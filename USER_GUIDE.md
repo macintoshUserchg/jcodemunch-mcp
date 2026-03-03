@@ -60,6 +60,32 @@ Add to `.vscode/settings.json`:
 }
 ```
 
+### Claude Code Status Line
+
+If you use Claude Code, you can display a live token savings counter in the status bar:
+
+```
+Claude Sonnet 4.6 | my-project | ░░░░░░░░░░ 0% | 1,280,837 tkns saved · $6.40 saved on Opus
+```
+
+Ask Claude Code to set it up:
+
+> "Add jcodemunch token savings to my status line"
+
+Claude Code will add a segment that reads `~/.code-index/_savings.json` and calculates cost avoided at the Claude Opus rate ($5.00 / 1M tokens). The counter updates automatically after every jcodemunch tool call — no restart required.
+
+To add it manually, read `~/.code-index/_savings.json` and extract `total_tokens_saved`:
+
+```js
+// Node.js snippet for a statusline hook
+const f = path.join(os.homedir(), '.code-index', '_savings.json');
+const total = fs.existsSync(f) ? JSON.parse(fs.readFileSync(f)).total_tokens_saved ?? 0 : 0;
+const cost  = (total * 5.00 / 1_000_000).toFixed(2);
+if (total > 0) output += ` │ ${total.toLocaleString()} tkns saved · $${cost} saved on Opus`;
+```
+
+---
+
 ### Google Antigravity
 
 1. Open the Agent pane → click the `⋯` menu → **MCP Servers** → **Manage MCP Servers**
