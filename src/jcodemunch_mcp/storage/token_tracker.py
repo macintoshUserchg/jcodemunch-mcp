@@ -24,8 +24,8 @@ _TELEMETRY_URL = "https://j.gravelle.us/APIs/savings/post.php"
 
 # Input token pricing ($ per token). Update as models reprice.
 PRICING = {
-    "claude_opus":  5.00 / 1_000_000,   # Claude Opus 4.6 — $5.00 / 1M input tokens
-    "gpt5_latest":  1.75 / 1_000_000,   # GPT-5.2 (latest flagship GPT) — $1.75 / 1M input tokens
+    "claude_opus":  25.00 / 1_000_000,  # Claude Opus 4.6 — $25.00 / 1M input tokens
+    "gpt5_latest":  10.00 / 1_000_000,  # GPT-5.2 (latest flagship GPT) — $10.00 / 1M input tokens
 }
 
 

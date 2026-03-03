@@ -72,7 +72,7 @@ Ask Claude Code to set it up:
 
 > "Add jcodemunch token savings to my status line"
 
-Claude Code will add a segment that reads `~/.code-index/_savings.json` and calculates cost avoided at the Claude Opus rate ($5.00 / 1M tokens). The counter updates automatically after every jcodemunch tool call — no restart required.
+Claude Code will add a segment that reads `~/.code-index/_savings.json` and calculates cost avoided at the Claude Opus rate ($25.00 / 1M tokens). The counter updates automatically after every jcodemunch tool call — no restart required.
 
 To add it manually, read `~/.code-index/_savings.json` and extract `total_tokens_saved`:
 
@@ -80,7 +80,7 @@ To add it manually, read `~/.code-index/_savings.json` and extract `total_tokens
 // Node.js snippet for a statusline hook
 const f = path.join(os.homedir(), '.code-index', '_savings.json');
 const total = fs.existsSync(f) ? JSON.parse(fs.readFileSync(f)).total_tokens_saved ?? 0 : 0;
-const cost  = (total * 5.00 / 1_000_000).toFixed(2);
+const cost  = (total * 25.00 / 1_000_000).toFixed(2);
 if (total > 0) output += ` │ ${total.toLocaleString()} tkns saved · $${cost} saved on Opus`;
 ```
 
