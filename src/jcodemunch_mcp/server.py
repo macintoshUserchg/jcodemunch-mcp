@@ -124,7 +124,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="get_file_outline",
-            description="Get all symbols (functions, classes, methods) in a file with signatures and summaries.",
+            description="Get all symbols (functions, classes, methods) in a file with signatures and summaries. Pass repo and file_path (e.g. 'src/main.py').",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -366,6 +366,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
     
+    except KeyError as e:
+        return [TextContent(type="text", text=json.dumps({"error": f"Missing required argument: {e}. Check the tool schema for correct parameter names."}, indent=2))]
     except Exception as e:
         return [TextContent(type="text", text=json.dumps({"error": str(e)}, indent=2))]
 
