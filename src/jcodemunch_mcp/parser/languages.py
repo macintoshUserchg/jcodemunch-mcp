@@ -437,6 +437,11 @@ CSHARP_SPEC = LanguageSpec(
         "delegate_declaration": "type",
         "method_declaration": "method",
         "constructor_declaration": "method",
+        "property_declaration": "constant",
+        "field_declaration": "constant",
+        "event_field_declaration": "constant",
+        "event_declaration": "constant",
+        "destructor_declaration": "method",
     },
     name_fields={
         "class_declaration": "name",
@@ -447,6 +452,9 @@ CSHARP_SPEC = LanguageSpec(
         "delegate_declaration": "name",
         "method_declaration": "name",
         "constructor_declaration": "name",
+        "property_declaration": "name",
+        "event_declaration": "name",
+        "destructor_declaration": "name",
     },
     param_fields={
         "method_declaration": "parameters",

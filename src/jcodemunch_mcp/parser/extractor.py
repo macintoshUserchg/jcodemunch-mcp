@@ -375,6 +375,18 @@ def _extract_name(node, spec: LanguageSpec, source_bytes: bytes) -> Optional[str
                     return source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")
         return None
 
+    # C#: field_declaration and event_field_declaration wrappers
+    if spec.ts_language == "csharp" and node.type in ("field_declaration", "event_field_declaration"):
+        for child in node.children:
+            if child.type == "variable_declaration":
+                # Find the first variable_declarator child
+                for vdecl in child.children:
+                    if vdecl.type == "variable_declarator":
+                        name_node = vdecl.child_by_field_name("name")
+                        if name_node:
+                            return source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")
+        return None
+
     if node.type not in spec.name_fields:
         return None
     
@@ -469,6 +481,10 @@ def _build_signature(node, spec: LanguageSpec, source_bytes: bytes) -> str:
             end_byte = body.start_byte if body else inner.end_byte
         else:
             end_byte = node.end_byte
+    elif spec.ts_language == "csharp" and node.type == "property_declaration":
+        # C# properties use 'accessors' field instead of 'body'
+        body = node.child_by_field_name("accessors")
+        end_byte = body.start_byte if body else node.end_byte
     elif spec.ts_language == "kotlin":
         # Kotlin uses no named fields; find body child by type
         body = None

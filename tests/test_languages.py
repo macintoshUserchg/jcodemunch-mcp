@@ -606,6 +606,16 @@ namespace SampleApp
 
     /// <summary>An immutable person record.</summary>
     public record Person(string Name, int Age);
+
+    public class ComplexEntity
+    {
+        public Guid Id { get; set; }
+        public readonly string Username = "admin";
+        public const int MAX_AGE = 120;
+        public int MultiA = 1, MultiB = 2;
+        public event EventHandler OnLogin;
+        ~ComplexEntity() { }
+    }
 }
 '''
 
@@ -661,6 +671,35 @@ def test_parse_csharp():
     record = next((s for s in symbols if s.name == "Person"), None)
     assert record is not None
     assert record.kind == "class"
+
+    # Properties, Fields, Constants, Events, Destructors
+    prop = next((s for s in symbols if s.name == "Id"), None)
+    assert prop is not None
+    assert prop.kind == "constant"
+    
+    field = next((s for s in symbols if s.name == "Username"), None)
+    assert field is not None
+    assert field.kind == "constant"
+    
+    multi_field = next((s for s in symbols if s.name == "MultiA"), None)
+    assert multi_field is not None
+    assert multi_field.kind == "constant"
+    # Note: jcodemunch implements a 1:1 mapping between AST nodes and symbols. 
+    # Therefore, a single field_declaration node with multiple variable_declarators 
+    # will only be indexed under the name of the first declarator (MultiA).
+    assert not any(s.name == "MultiB" for s in symbols)
+    
+    const = next((s for s in symbols if s.name == "MAX_AGE"), None)
+    assert const is not None
+    assert const.kind == "constant"
+    
+    evt = next((s for s in symbols if s.name == "OnLogin"), None)
+    assert evt is not None
+    assert evt.kind == "constant"
+    
+    dtor = next((s for s in symbols if s.name == "ComplexEntity" and s.kind == "method"), None)
+    assert dtor is not None
+    assert dtor.kind == "method"
 
 
 SWIFT_SOURCE = '''
