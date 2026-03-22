@@ -89,8 +89,11 @@ jcodemunch-mcp/
 ├── src/jcodemunch_mcp/
 │   ├── server.py
 │   ├── security.py
+│   ├── hook_event.py
 │   ├── parser/
 │   ├── storage/
+│   │   ├── index_store.py
+│   │   └── sqlite_store.py
 │   ├── summarizer/
 │   ├── tools/
 │   └── ...
@@ -276,18 +279,25 @@ Indexes are stored under `~/.code-index/` by default and can be redirected with 
 
 ### Core persisted artifacts
 
-The main storage artifacts are:
+The primary storage backend is **SQLite in WAL (Write-Ahead Logging) mode**. Each indexed repository produces:
 
-* `{repo}.json` for metadata, hashes, and symbol records
-* `{repo}/...` cached raw source files for exact retrieval
+* `{repo_slug}.db` — SQLite database containing metadata, symbols, files, imports, and content blobs
+* `{repo_slug}.db-wal` — WAL file for concurrent read/write access
+* `{repo_slug}.db-shm` — shared-memory file for WAL coordination
+* `{repo_slug}.meta` — lightweight metadata sidecar so repo listing does not require opening the database
+* `{repo_slug}.checksum` — SHA-256 checksum sidecar for integrity verification
+* `{repo_slug}/...` — cached raw source files for exact retrieval
+
+The SQLite schema includes tables for `meta`, `symbols`, `files`, `imports`, `raw_cache`, and `content_blob` with appropriate indexes. Legacy JSON indexes (`{repo_slug}.json`) are auto-migrated to SQLite on first load.
+
+### WAL mode benefits
+
+WAL mode enables concurrent readers alongside a single writer, which is important for watch-mode scenarios where incremental reindexing runs while MCP tool calls serve retrieval queries. On graceful shutdown, the server checkpoints and compacts WAL files.
 
 ### Additional storage features
 
-Recent storage-oriented improvements include:
-
-* cross-process file locking to prevent concurrent corruption
 * LRU index cache with mtime invalidation
-* metadata sidecars so repo listing does not require loading full index JSON
+* metadata sidecars so repo listing does not require loading full indexes
 * schema validation on index load
 * SHA-256 checksum sidecars for integrity verification
 
@@ -310,9 +320,13 @@ Incremental indexing is based on stored file hashes and related repository metad
 Enhancements to incremental indexing include:
 
 * GitHub tree SHA short-circuiting for no-change reindexes
+* mtime fast-path with fallback to hash comparison on mtime mismatch
 * watch-triggered incremental reindexing
-* atomic writes using temporary files
-* locking and integrity checks for concurrent or interrupted runs
+* SQLite WAL mode for concurrent read/write during incremental updates
+
+### File discovery optimization
+
+File discovery uses pre-resolved path strings and inlined security checks to minimize per-file overhead. Gitignore matching uses string prefix comparison instead of Path operations. These optimizations reduced full-index discovery time by approximately 2x on large repositories.
 
 ### Watch mode
 
@@ -401,6 +415,18 @@ Search is best understood as a hybrid structured ranking pipeline that combines 
 
 A major architectural expansion in recent versions is support for lightweight relationship and impact analysis.
 
+### `find_importers` and `find_references`
+
+`find_importers` answers "what files import this file?" by resolving import specifiers against indexed source files. `find_references` answers "where is this identifier used?" by matching named imports and specifier stems. Both support batch array parameters (`file_paths` and `identifiers` respectively) for querying multiple targets in a single call with shared index loading.
+
+### `get_dependency_graph`
+
+This operation traverses the file-level dependency graph up to 3 hops in either direction (imports, importers, or both), providing a structural overview of file relationships.
+
+### `check_references`
+
+A composite tool that combines import-level reference checking (same logic as `find_references`) with content-level substring search (same approach as `search_text`) in one call. Returns an `is_referenced` boolean for quick dead-code detection. Skips defining files in content search to avoid false positives. Supports both singular and batch modes.
+
 ### `get_related_symbols`
 
 This operation uses multiple heuristics, including:
@@ -443,7 +469,7 @@ The tool surface is best described by capability domain rather than by a fixed c
 
 * `get_repo_outline`
 * `get_file_tree`
-* `get_file_outline`
+* `get_file_outline` — supports batch via `file_paths` array parameter
 * `suggest_queries`
 
 ### Retrieval
@@ -453,17 +479,26 @@ The tool surface is best described by capability domain rather than by a fixed c
 * `get_symbols`
 * `get_context_bundle`
 
-### Search
+### Search and reference checking
 
 * `search_symbols`
 * `search_text`
+* `search_columns`
+* `check_references` — composite tool combining import + content search for dead-code detection
 
 ### Relationship and impact analysis
 
+* `find_importers` — supports batch via `file_paths` array parameter
+* `find_references` — supports batch via `identifiers` array parameter
+* `get_dependency_graph`
 * `get_related_symbols`
 * `get_class_hierarchy`
 * `get_blast_radius`
 * `get_symbol_diff`
+
+### Batch query support
+
+Several tools accept array parameters alongside their singular equivalents, enabling multiple queries in a single call. This reduces LLM round-trips and cache re-reads. Singular parameters continue to return the original flat response shape for backward compatibility. Batch mode returns a grouped `results` array. Response-level `tip` fields in `_meta` guide models toward batch usage without requiring external configuration.
 
 ### Domain-specific retrieval
 
@@ -509,6 +544,10 @@ Representative fields include:
 * `tokens_saved`
 * `total_tokens_saved`
 * `estimate_method`
+* `cost_avoided` — estimated cost savings per model (dict with model names as keys)
+* `total_cost_avoided` — cumulative cost savings across session
+* `powered_by` — attribution string
+* `tip` — guidance for models toward more efficient tool usage (e.g., batch params, composite tools)
 
 Representative shape:
 
@@ -521,10 +560,16 @@ Representative shape:
     "truncated": false,
     "tokens_saved": 2450,
     "total_tokens_saved": 184320,
-    "estimate_method": "..."
+    "estimate_method": "...",
+    "cost_avoided": {"claude_opus_4_6": 0.012, "claude_sonnet_4_6": 0.007},
+    "total_cost_avoided": {"claude_opus_4_6": 968.32, "claude_sonnet_4_6": 580.99},
+    "powered_by": "jcodemunch-mcp by jgravelle",
+    "tip": "Tip: use file_paths=[...] to query multiple files in one call."
   }
 }
 ```
+
+Not all fields are present in every response. `tip` fields appear only in single-item responses and are stripped from batch results to keep them clean.
 
 ### Savings telemetry
 
@@ -572,10 +617,13 @@ Recent versions added or documented several performance-oriented mechanisms:
 * bounded heap search for better top-k scaling
 * LRU index cache with mtime invalidation
 * sidecars for cheaper repo listing
-* incremental indexing
+* incremental indexing with mtime fast-path
 * watch-based updates
 * centrality-aware ranking
 * no-change short-circuiting via Git tree SHA
+* SQLite WAL mode for concurrent read/write without locking
+* optimized file discovery using pre-resolved path strings and inlined security checks (approximately 2x speedup)
+* batch array parameters on high-call-count tools to reduce LLM round-trips and cache re-reads
 
 ### Practical implications
 
@@ -585,6 +633,7 @@ The system is architected to stay responsive in larger repositories by:
 2. minimizing reloading
 3. minimizing retrieval payload size
 4. avoiding full result sorts when only top-k results are needed
+5. minimizing LLM round-trips through batch query support
 
 ---
 
@@ -657,10 +706,12 @@ Representative architectural dependencies include:
 | `mcp`                       | MCP server framework            |
 | `httpx`                     | Async HTTP and GitHub access    |
 | `tree-sitter-language-pack` | Precompiled language grammars   |
+| `pathspec`                  | Gitignore pattern matching      |
 | `anthropic`                 | Claude-based summarization      |
 | `google-generativeai`       | Gemini-based summarization      |
 | `pyyaml`                    | dbt schema and provider parsing |
 | `watchfiles`                | optional watch mode             |
 | `filelock`                  | cross-process index protection  |
+| `sqlite3` (stdlib)          | WAL-mode index storage backend  |
 
-These dependencies support the core architectural layers: protocol transport, repository acquisition, parsing, summarization, file watching, and safe concurrent storage.
+These dependencies support the core architectural layers: protocol transport, repository acquisition, parsing, storage, summarization, file watching, and safe concurrent access.
