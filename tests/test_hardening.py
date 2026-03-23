@@ -1136,3 +1136,116 @@ class TestIsGitignoredfastCaseNormalization:
         prefix = str(tmp_path / "project") + os.sep
         specs = self._make_specs(prefix, ["*.log"])
         assert _is_gitignored_fast(str(other / "app.log"), specs) is False
+
+
+# ---------------------------------------------------------------------------
+# S9 — Rate-limiting middleware (T6)
+# ---------------------------------------------------------------------------
+
+class TestRateLimitMiddleware:
+    """T6: _make_rate_limit_middleware enforces per-IP request caps."""
+
+    def test_returns_none_when_disabled(self):
+        """JCODEMUNCH_RATE_LIMIT unset or 0 must return None (no middleware)."""
+        import os
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("JCODEMUNCH_RATE_LIMIT", None)
+            from jcodemunch_mcp.server import _make_rate_limit_middleware
+            assert _make_rate_limit_middleware() is None
+
+        with patch.dict(os.environ, {"JCODEMUNCH_RATE_LIMIT": "0"}):
+            assert _make_rate_limit_middleware() is None
+
+    def test_allows_requests_within_limit(self):
+        """Requests up to the per-minute limit must pass through (200)."""
+        import os
+        import asyncio
+        from unittest.mock import MagicMock, AsyncMock, patch
+
+        with patch.dict(os.environ, {"JCODEMUNCH_RATE_LIMIT": "3"}):
+            from jcodemunch_mcp.server import _make_rate_limit_middleware
+            mw_wrapper = _make_rate_limit_middleware()
+
+        assert mw_wrapper is not None
+        instance = mw_wrapper.cls(app=MagicMock())
+        call_next = AsyncMock(return_value=MagicMock(status_code=200))
+
+        def make_request(ip="127.0.0.1"):
+            req = MagicMock()
+            req.client.host = ip
+            return req
+
+        loop = asyncio.new_event_loop()
+        try:
+            for _ in range(3):
+                resp = loop.run_until_complete(instance.dispatch(make_request(), call_next))
+                assert resp.status_code == 200
+        finally:
+            loop.close()
+
+    def test_blocks_request_over_limit(self):
+        """The (limit+1)-th request from the same IP must return 429."""
+        import os
+        import asyncio
+        from unittest.mock import MagicMock, AsyncMock, patch
+        from starlette.responses import JSONResponse
+
+        with patch.dict(os.environ, {"JCODEMUNCH_RATE_LIMIT": "2"}):
+            from jcodemunch_mcp.server import _make_rate_limit_middleware
+            mw_wrapper = _make_rate_limit_middleware()
+
+        instance = mw_wrapper.cls(app=MagicMock())
+        call_next = AsyncMock(return_value=MagicMock(status_code=200))
+
+        def make_request(ip="10.0.0.1"):
+            req = MagicMock()
+            req.client.host = ip
+            return req
+
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(instance.dispatch(make_request(), call_next))
+            loop.run_until_complete(instance.dispatch(make_request(), call_next))
+            response = loop.run_until_complete(instance.dispatch(make_request(), call_next))
+        finally:
+            loop.close()
+
+        assert isinstance(response, JSONResponse)
+        assert response.status_code == 429
+        assert "Retry-After" in response.headers
+
+    def test_different_ips_are_independent(self):
+        """Rate limit buckets are per-IP — a second IP must not be blocked."""
+        import os
+        import asyncio
+        from unittest.mock import MagicMock, AsyncMock, patch
+        from starlette.responses import JSONResponse
+
+        with patch.dict(os.environ, {"JCODEMUNCH_RATE_LIMIT": "1"}):
+            from jcodemunch_mcp.server import _make_rate_limit_middleware
+            mw_wrapper = _make_rate_limit_middleware()
+
+        instance = mw_wrapper.cls(app=MagicMock())
+        ok_response = MagicMock(status_code=200)
+        call_next = AsyncMock(return_value=ok_response)
+
+        def make_request(ip):
+            req = MagicMock()
+            req.client.host = ip
+            return req
+
+        loop = asyncio.new_event_loop()
+        try:
+            # Exhaust IP A's bucket
+            loop.run_until_complete(instance.dispatch(make_request("192.168.1.1"), call_next))
+            blocked = loop.run_until_complete(instance.dispatch(make_request("192.168.1.1"), call_next))
+            # IP B is still fresh
+            allowed = loop.run_until_complete(instance.dispatch(make_request("192.168.1.2"), call_next))
+        finally:
+            loop.close()
+
+        assert isinstance(blocked, JSONResponse)
+        assert blocked.status_code == 429
+        assert allowed.status_code == 200

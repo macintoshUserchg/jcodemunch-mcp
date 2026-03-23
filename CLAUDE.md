@@ -1,9 +1,9 @@
 # jcodemunch-mcp — Project Brief
 
 ## Current State
-- **Version:** 1.10.9 (published to PyPI)
+- **Version:** 1.10.10 (published to PyPI)
 - **INDEX_VERSION:** 4
-- **Tests:** 881 passed, 7 skipped
+- **Tests:** 885 passed, 7 skipped
 - **Python:** >=3.10
 
 ## Key Files
@@ -84,6 +84,7 @@ Custom parsers (tree-sitter grammar lacks clean named fields):
 | `OPENAI_CONCURRENCY` | 1 | Parallel batch requests to local LLM |
 | `OPENAI_MAX_TOKENS` | 500 | Max output tokens per batch |
 | `JCODEMUNCH_HTTP_TOKEN` | — | Bearer token for HTTP transport auth (opt-in) |
+| `JCODEMUNCH_RATE_LIMIT` | 0 | Max requests per minute per client IP in HTTP transport (0 = disabled) |
 | `JCODEMUNCH_REDACT_SOURCE_ROOT` | 0 | Set 1 to replace source_root with display_name in responses |
 
 ## Summarizer Priority
@@ -175,6 +176,7 @@ Custom parsers (tree-sitter grammar lacks clean named fields):
 | 1.10.7 | Perf: bare-name repo lookup cache in resolve_repo (P5) — mtime-gated module-level dict avoids O(N) list_repos() scan on every tool call; cost when warm is one stat() per call |
 | 1.10.8 | Perf: token_tracker telemetry now uses a single daemon worker thread + queue.Queue (P11) — eliminates per-flush thread creation; _share_savings enqueues work instead of spawning Thread |
 | 1.10.9 | Perf: discover_local_files merges two os.walk passes into one (P8) — .gitignore specs loaded incrementally during file enumeration, eliminating redundant full-tree walk |
+| 1.10.10 | Security: optional per-IP rate-limiting middleware for HTTP transport (S9) — set JCODEMUNCH_RATE_LIMIT=N to cap N requests/minute per client IP; disabled by default |
 
 ## Maintenance Practices
 

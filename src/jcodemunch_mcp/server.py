@@ -1115,6 +1115,53 @@ def _make_auth_middleware():
     return Middleware(BearerAuthMiddleware)
 
 
+def _make_rate_limit_middleware():
+    """Return a Starlette middleware that rate-limits by IP (optional, opt-in).
+
+    Reads JCODEMUNCH_RATE_LIMIT env var.  Value is max requests per minute per
+    client IP.  0 or unset disables rate limiting (default — no behaviour change
+    for existing deployments).
+
+    Returns a Middleware instance, or None when rate limiting is disabled.
+    """
+    try:
+        limit = int(os.environ.get("JCODEMUNCH_RATE_LIMIT", "0"))
+    except (ValueError, TypeError):
+        limit = 0
+    if limit <= 0:
+        return None
+
+    import collections
+    import time as _time
+
+    from starlette.middleware import Middleware
+    from starlette.middleware.base import BaseHTTPMiddleware
+    from starlette.responses import JSONResponse
+
+    _WINDOW = 60.0  # seconds
+    _buckets: dict[str, collections.deque] = {}
+
+    class RateLimitMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request, call_next):
+            ip = request.client.host if request.client else "unknown"
+            now = _time.monotonic()
+            bucket = _buckets.setdefault(ip, collections.deque())
+            # Evict timestamps outside the sliding window
+            while bucket and now - bucket[0] >= _WINDOW:
+                bucket.popleft()
+            if len(bucket) >= limit:
+                retry_after = int(_WINDOW - (now - bucket[0])) + 1
+                return JSONResponse(
+                    {"error": f"Rate limit exceeded. Max {limit} requests per minute per IP."},
+                    status_code=429,
+                    headers={"Retry-After": str(retry_after)},
+                )
+            bucket.append(now)
+            return await call_next(request)
+
+    return Middleware(RateLimitMiddleware)
+
+
 async def run_sse_server(host: str, port: int):
     """Run the MCP server with SSE transport (persistent HTTP mode)."""
     import sys
@@ -1146,6 +1193,9 @@ async def run_sse_server(host: str, port: int):
     auth_mw = _make_auth_middleware()
     if auth_mw:
         middleware.append(auth_mw)
+    rate_mw = _make_rate_limit_middleware()
+    if rate_mw:
+        middleware.append(rate_mw)
 
     starlette_app = Starlette(
         routes=[
@@ -1202,6 +1252,9 @@ async def run_streamable_http_server(host: str, port: int):
     auth_mw = _make_auth_middleware()
     if auth_mw:
         middleware.append(auth_mw)
+    rate_mw = _make_rate_limit_middleware()
+    if rate_mw:
+        middleware.append(rate_mw)
 
     starlette_app = Starlette(
         routes=[
