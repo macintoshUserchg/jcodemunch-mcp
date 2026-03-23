@@ -1,7 +1,7 @@
 # jcodemunch-mcp — Project Brief
 
 ## Current State
-- **Version:** 1.10.12 (published to PyPI)
+- **Version:** 1.10.13 (published to PyPI)
 - **INDEX_VERSION:** 4
 - **Tests:** 885 passed, 7 skipped
 - **Python:** >=3.10
@@ -189,6 +189,7 @@ Custom parsers (tree-sitter grammar lacks clean named fields):
 | 1.10.10 | Security: optional per-IP rate-limiting middleware for HTTP transport (S9) — set JCODEMUNCH_RATE_LIMIT=N to cap N requests/minute per client IP; disabled by default |
 | 1.10.11 | UX: `jcodemunch-mcp config` subcommand — prints effective configuration grouped by concern; `--check` validates storage path, AI provider package, and HTTP transport packages |
 | 1.10.12 | UX: `get_repo_outline` now includes `most_imported_files` (top 10 by import in-degree, requires import graph); `get_symbol_diff` MCP description now includes step-by-step branch diff workflow |
+| 1.10.13 | Perf: remove 4-model cost table from per-tool _meta (cost_avoided now returns {}); trim 6 verbose tool descriptions — reduces schema tokens ~249/turn and _meta overhead ~71 tokens/call (×9 tools, compounding) |
 
 ## Maintenance Practices
 

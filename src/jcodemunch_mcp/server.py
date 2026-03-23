@@ -481,7 +481,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="find_importers",
-            description="Find all files that import from a given file path. Answers 'what uses this file?'. Each result includes has_importers (bool) indicating whether that importer is itself imported — use this to detect transitive dead code chains (an importer with has_importers=false is itself unreachable). For dbt, resolves {{ ref() }} edges; {{ source() }} edges are extracted but not resolvable to files since sources are external. Requires re-indexing with v1.3.0+. Use file_paths for batch queries across multiple files.",
+            description="Find all files that import a given file. Answers 'what uses this file?'. has_importers=false on a result means that importer is itself unreachable (dead code chain). Supports dbt {{ ref() }} edges. Use file_paths for batch queries.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -495,7 +495,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="find_references",
-            description="Find all files that import or reference a given identifier (symbol name, module name, or class name). Answers 'where is this used?'. For dbt, traces {{ ref() }} edges; {{ source() }} specifiers are extracted but not resolvable since sources are external. Requires re-indexing with v1.3.0+. Use identifiers for batch queries across multiple identifiers.",
+            description="Find all files that import or reference an identifier. Answers 'where is this used?'. Supports dbt {{ ref() }} edges. Use identifiers for batch queries.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -560,7 +560,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="get_context_bundle",
-            description="Get a context bundle: full source + imports for one or more symbols. Multi-symbol bundles deduplicate imports when symbols share a file. Set include_callers=true to also get the list of files that directly import each symbol's file — useful for understanding usage before refactoring.",
+            description="Get full source + imports for one or more symbols in one call. Multi-symbol bundles deduplicate shared imports. Set include_callers=true to also list files that import the symbol's file.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -631,7 +631,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="get_symbol_diff",
-            description="Diff the symbol sets of two indexed repositories (or two branches). Shows added, removed, and changed symbols using content_hash for change detection. Branch diff workflow: (1) on branch A run index_folder repo=owner/repo-main, (2) checkout branch B run index_folder repo=owner/repo-feature, (3) call get_symbol_diff repo_a=owner/repo-main repo_b=owner/repo-feature.",
+            description="Diff symbol sets between two indexed snapshots. Shows added, removed, and changed symbols. Branch workflow: index branch A as repo-main, index branch B as repo-feature, then diff.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -668,7 +668,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="suggest_queries",
-            description="Scan the index and suggest useful search queries, key entry-point files, and index statistics. Great first call when starting to explore an unfamiliar repository — surfaces the most-imported files, top keywords, kind/language distribution, and ready-to-run example queries.",
+            description="Suggest search queries, entry-point files, and index stats. Good first call on an unfamiliar repo — surfaces most-imported files, top keywords, and ready-to-run example queries.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -679,7 +679,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="get_blast_radius",
-            description="Analyse the blast radius of changing a symbol: find every file that imports its defining file and (optionally) references the symbol by name. Returns 'confirmed' files (import + name match) and 'potential' files (import only, e.g. wildcard). Use before renaming, deleting, or changing a function/class signature.",
+            description="Find all files affected by changing a symbol. Returns confirmed files (import + name match) and potential files (import only, e.g. wildcard). Use before renaming or deleting a symbol.",
             inputSchema={
                 "type": "object",
                 "properties": {

@@ -319,22 +319,10 @@ def estimate_savings(raw_bytes: int, response_bytes: int) -> int:
 
 
 def cost_avoided(tokens_saved: int, total_tokens_saved: int) -> dict:
-    """Return cost avoided estimates for this call and the running total.
+    """Formerly returned per-call cost breakdowns for _meta envelopes.
 
-    Returns a dict ready to be merged into a _meta envelope:
-        cost_avoided:       {claude_opus: float, gpt5_latest: float}
-        total_cost_avoided: {claude_opus: float, gpt5_latest: float}
-
-    Values are in USD, rounded to 4 decimal places.
+    Now returns an empty dict — cost detail is available via get_session_stats
+    only. Removing 4-model cost tables from every per-tool _meta response
+    reduces conversation-history token overhead by ~70 tokens/call.
     """
-    return {
-        "estimate_method": "byte_approx",
-        "cost_avoided": {
-            model: round(tokens_saved * rate, 4)
-            for model, rate in PRICING.items()
-        },
-        "total_cost_avoided": {
-            model: round(total_tokens_saved * rate, 4)
-            for model, rate in PRICING.items()
-        },
-    }
+    return {}
