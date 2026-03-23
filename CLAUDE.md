@@ -3,7 +3,7 @@
 ## Current State
 - **Version:** 1.10.17 (published to PyPI)
 - **INDEX_VERSION:** 4
-- **Tests:** 885 passed, 7 skipped
+- **Tests:** 961 passed, 7 skipped
 - **Python:** >=3.10
 
 ## Key Files
@@ -191,6 +191,8 @@ Custom parsers (tree-sitter grammar lacks clean named fields):
 | 1.10.11 | UX: `jcodemunch-mcp config` subcommand — prints effective configuration grouped by concern; `--check` validates storage path, AI provider package, and HTTP transport packages |
 | 1.10.12 | UX: `get_repo_outline` now includes `most_imported_files` (top 10 by import in-degree, requires import graph); `get_symbol_diff` MCP description now includes step-by-step branch diff workflow |
 | 1.10.13 | Perf: remove 4-model cost table from per-tool _meta (cost_avoided now returns {}); trim 6 verbose tool descriptions — reduces schema tokens ~249/turn and _meta overhead ~71 tokens/call (×9 tools, compounding) |
+| 1.10.14 | Watcher backpressure + index freshness: memory hash cache (~57ms savings/tick), watcher fast path (~3s → ~50ms on Windows), deferred AI summarization (index queryable immediately), per-repo reindex state with threading.Event signaling, _meta staleness fields on all query responses, wait_for_fresh tool, --freshness-mode=strict CLI flag; 78 regression tests — contributed by MariusAdrian88 (PR #154) |
+| 1.10.15 | Perf: suppress_meta param on all 25 tools — add suppress_meta=true to strip _meta envelope (~100-200 tokens/call savings); injected at list_tools() time via single property dict, stripped in call_tool dispatcher; 3 new tests — requested by Mharbulous (#142) |
 | 1.10.16 | Docs: expand tool reference in USER_GUIDE.md, QUICKSTART.md, and README.md with new tools; add AGENT_HOOKS.md cross-links (PR #155 by gokhanozdemir) |
 | 1.10.17 | CLI: `index-file <path>` subcommand — re-index a single file from the shell; enables PostToolUse hooks for automatic index freshness after agent edits (PR #156 by gokhanozdemir) |
 
