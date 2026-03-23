@@ -617,7 +617,8 @@ async def test_language_enum_all_languages_when_config_none(monkeypatch):
         config_module._GLOBAL_CONFIG.update(orig_config)
 
 
-
+@pytest.mark.asyncio
+async def test_disabled_tools_filtered_from_schema(monkeypatch):
     """Should remove disabled tools from list_tools output."""
     from jcodemunch_mcp import config as config_module
 
@@ -679,9 +680,221 @@ async def test_meta_fields_null_keeps_meta_envelope():
 
 
 @pytest.mark.asyncio
+async def test_meta_fields_empty_list_removes_meta():
+    """meta_fields=[] removes _meta entirely (maximum token savings)."""
+    from jcodemunch_mcp import config as config_module
+
+    orig_config = config_module._GLOBAL_CONFIG.copy()
+    config_module._GLOBAL_CONFIG.clear()
+
+    try:
+        config_module._GLOBAL_CONFIG["meta_fields"] = []
+        with patch("jcodemunch_mcp.server.list_repos", return_value={"repos": [], "_meta": {"timing_ms": 5.0}}):
+            result = await call_tool("list_repos", {})
+        payload = json.loads(result[0].text)
+        assert "_meta" not in payload
+    finally:
+        config_module._GLOBAL_CONFIG.clear()
+        config_module._GLOBAL_CONFIG.update(orig_config)
+
+
+@pytest.mark.asyncio
 async def test_list_tools_no_suppress_meta_param():
     """No tool schema exposes suppress_meta (replaced by meta_fields config)."""
     tools = await list_tools()
     for tool in tools:
         props = (tool.inputSchema or {}).get("properties", {})
         assert "suppress_meta" not in props, f"{tool.name} should not have suppress_meta"
+
+
+@pytest.mark.asyncio
+async def test_sql_language_gating_removes_search_columns(monkeypatch):
+    """Removing 'sql' from languages auto-disables search_columns tool."""
+    from jcodemunch_mcp import config as config_module
+
+    orig_config = config_module._GLOBAL_CONFIG.copy()
+    config_module._GLOBAL_CONFIG.clear()
+
+    try:
+        # Enable only python and javascript — sql is NOT in the list
+        config_module._GLOBAL_CONFIG["languages"] = ["python", "javascript"]
+        config_module._GLOBAL_CONFIG["disabled_tools"] = []
+
+        tools = await list_tools()
+        tool_names = [t.name for t in tools]
+
+        # search_columns must be absent when sql is not in languages
+        assert "search_columns" not in tool_names
+        # Other tools should remain
+        assert "search_symbols" in tool_names
+        assert "get_file_tree" in tool_names
+    finally:
+        config_module._GLOBAL_CONFIG.clear()
+        config_module._GLOBAL_CONFIG.update(orig_config)
+
+
+@pytest.mark.asyncio
+async def test_sql_in_languages_keeps_search_columns(monkeypatch):
+    """When sql IS in languages, search_columns remains in the schema."""
+    from jcodemunch_mcp import config as config_module
+
+    orig_config = config_module._GLOBAL_CONFIG.copy()
+    config_module._GLOBAL_CONFIG.clear()
+
+    try:
+        config_module._GLOBAL_CONFIG["languages"] = ["python", "sql"]
+        config_module._GLOBAL_CONFIG["disabled_tools"] = []
+
+        tools = await list_tools()
+        tool_names = [t.name for t in tools]
+
+        # search_columns must be present when sql is in languages
+        assert "search_columns" in tool_names
+    finally:
+        config_module._GLOBAL_CONFIG.clear()
+        config_module._GLOBAL_CONFIG.update(orig_config)
+
+
+# ── Description Override Empty String Tests (B1, B2) ──────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_descriptions_empty_string_tool_clears_description():
+    """Empty string _tool clears the tool description (B1)."""
+    from jcodemunch_mcp import config as config_module
+
+    orig_config = config_module._GLOBAL_CONFIG.copy()
+    config_module._GLOBAL_CONFIG.clear()
+
+    try:
+        # Set _tool to empty string — should clear the description
+        config_module._GLOBAL_CONFIG["descriptions"] = {
+            "search_symbols": {"_tool": ""},
+        }
+        config_module._GLOBAL_CONFIG["disabled_tools"] = []
+
+        tools = await list_tools()
+        search_symbols = next((t for t in tools if t.name == "search_symbols"), None)
+        assert search_symbols is not None
+        # Empty string means "use hardcoded minimal base only"
+        assert search_symbols.description == ""
+    finally:
+        config_module._GLOBAL_CONFIG.clear()
+        config_module._GLOBAL_CONFIG.update(orig_config)
+
+
+@pytest.mark.asyncio
+async def test_descriptions_empty_string_param_clears_description():
+    """Empty string param description clears the param description (B2)."""
+    from jcodemunch_mcp import config as config_module
+
+    orig_config = config_module._GLOBAL_CONFIG.copy()
+    config_module._GLOBAL_CONFIG.clear()
+
+    try:
+        # Set param to empty string via _shared — should clear repo param description
+        config_module._GLOBAL_CONFIG["descriptions"] = {
+            "_shared": {"repo": ""},
+        }
+        config_module._GLOBAL_CONFIG["disabled_tools"] = []
+
+        tools = await list_tools()
+        search_symbols = next((t for t in tools if t.name == "search_symbols"), None)
+        assert search_symbols is not None
+
+        # repo param description should be cleared to empty string
+        repo_param = search_symbols.inputSchema.get("properties", {}).get("repo", {})
+        assert repo_param.get("description") == ""
+    finally:
+        config_module._GLOBAL_CONFIG.clear()
+        config_module._GLOBAL_CONFIG.update(orig_config)
+
+
+# ── Meta Fields Partial List Test (E1) ─────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_meta_fields_partial_list_preserves_tool_fields():
+    """Partial meta_fields list preserves tool-generated fields like timing_ms (E1)."""
+    import jcodemunch_mcp.server as server_module
+    from jcodemunch_mcp import config as config_module
+    import functools
+
+    orig_config = config_module._GLOBAL_CONFIG.copy()
+    orig_list_repos = server_module.list_repos
+
+    def fake_list_repos(storage_path=None):
+        return {"repos": [], "_meta": {
+            "timing_ms": 12.5,
+            "tokens_saved": 1000,
+            "candidates_scored": 50,
+        }}
+
+    try:
+        config_module._GLOBAL_CONFIG.clear()
+        config_module._GLOBAL_CONFIG["meta_fields"] = ["timing_ms"]
+        config_module._GLOBAL_CONFIG["disabled_tools"] = []
+
+        # Patch at the functools.partial level by replacing the module-level name
+        # and clearing the _TOOL_SCHEMAS cache so schemas are rebuilt
+        server_module.list_repos = fake_list_repos
+        # Clear the tool schemas cache so call_tool picks up the patched function
+        server_module._TOOL_SCHEMAS = None
+
+        result = await call_tool("list_repos", {})
+
+        payload = json.loads(result[0].text)
+        assert "_meta" in payload
+        # timing_ms should be preserved
+        assert payload["_meta"]["timing_ms"] == 12.5
+        # tokens_saved should NOT be in _meta (not in partial list)
+        assert "tokens_saved" not in payload["_meta"]
+        # candidates_scored should NOT be in _meta (not in partial list)
+        assert "candidates_scored" not in payload["_meta"]
+    finally:
+        server_module.list_repos = orig_list_repos
+        config_module._GLOBAL_CONFIG.clear()
+        config_module._GLOBAL_CONFIG.update(orig_config)
+
+
+# ── Project-Level Tool Disabling Test (M2) ─────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_project_tool_disabled_rejected_in_call_tool():
+    """Project-level disabled_tools rejects the tool at call_tool with an error (M2)."""
+    from jcodemunch_mcp import config as config_module
+
+    orig_global = config_module._GLOBAL_CONFIG.copy()
+    orig_project = config_module._PROJECT_CONFIGS.copy()
+    config_module._GLOBAL_CONFIG.clear()
+    config_module._PROJECT_CONFIGS.clear()
+
+    try:
+        # Global config: tool is NOT disabled (schema includes it)
+        config_module._GLOBAL_CONFIG["disabled_tools"] = []
+        config_module._GLOBAL_CONFIG["meta_fields"] = None
+
+        # Project config: index_folder IS disabled
+        project_root = "/fake/project"
+        config_module._PROJECT_CONFIGS[project_root] = {
+            **config_module._GLOBAL_CONFIG,
+            "disabled_tools": ["index_folder"],
+        }
+
+        # Attempting to call index_folder for the project should be rejected
+        result = await call_tool("index_folder", {
+            "path": "/fake/project/src",
+            "repo": project_root,
+        })
+
+        payload = json.loads(result[0].text)
+        assert "error" in payload
+        assert "index_folder" in payload["error"]
+        assert "disabled" in payload["error"].lower()
+        assert "project" in payload["error"].lower()
+    finally:
+        config_module._GLOBAL_CONFIG.clear()
+        config_module._GLOBAL_CONFIG.update(orig_global)
+        config_module._PROJECT_CONFIGS.clear()
+        config_module._PROJECT_CONFIGS.update(orig_project)

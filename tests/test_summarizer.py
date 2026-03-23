@@ -124,6 +124,9 @@ def test_anthropic_summarizer_base_url():
             "ANTHROPIC_BASE_URL": "https://proxy.example.com/v1",
             "JCODEMUNCH_ALLOW_REMOTE_SUMMARIZER": "1",
         }, clear=True):
+            # Set config value directly (module already imported)
+            from jcodemunch_mcp import config as _cfg_module
+            _cfg_module._GLOBAL_CONFIG["allow_remote_summarizer"] = True
             from jcodemunch_mcp.summarizer.batch_summarize import BatchSummarizer
             summarizer = BatchSummarizer()
 

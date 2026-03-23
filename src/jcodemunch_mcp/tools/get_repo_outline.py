@@ -7,6 +7,7 @@ from collections import Counter
 from datetime import datetime, timezone
 from typing import Optional
 
+from .. import config as _config
 from ..storage import IndexStore, record_savings, estimate_savings, cost_avoided
 from ..parser.imports import resolve_specifier
 from ._utils import resolve_repo
@@ -99,7 +100,7 @@ def get_repo_outline(
     # Staleness warning
     staleness_warning = None
     try:
-        staleness_days = int(os.environ.get("JCODEMUNCH_STALENESS_DAYS", "7"))
+        staleness_days = _config.get("staleness_days", 7)
         indexed_dt = datetime.fromisoformat(index.indexed_at)
         if indexed_dt.tzinfo is None:
             indexed_dt = indexed_dt.replace(tzinfo=timezone.utc)

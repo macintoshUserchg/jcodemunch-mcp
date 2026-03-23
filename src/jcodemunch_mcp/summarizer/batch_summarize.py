@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Optional
 from urllib.parse import urlparse
 
+from .. import config as _config
 from ..parser.symbols import Symbol
 
 logger = logging.getLogger(__name__)
@@ -88,7 +89,7 @@ class BaseSummarizer:
         if not to_summarize:
             return symbols
 
-        max_workers = int(os.environ.get("JCODEMUNCH_SUMMARIZER_CONCURRENCY", "4"))
+        max_workers = _config.get("summarizer_concurrency", 4)
         batches = [to_summarize[i:i + batch_size] for i in range(0, len(to_summarize), batch_size)]
 
         if max_workers <= 1 or len(batches) <= 1:
@@ -182,7 +183,7 @@ class BatchSummarizer(BaseSummarizer):
                 base_url = os.environ.get("ANTHROPIC_BASE_URL")
                 kwargs = {"api_key": api_key}
                 if base_url:
-                    allow_remote = os.environ.get("JCODEMUNCH_ALLOW_REMOTE_SUMMARIZER", "0") == "1"
+                    allow_remote = _config.get("allow_remote_summarizer", False)
                     if _is_localhost_url(base_url) or allow_remote:
                         kwargs["base_url"] = base_url
                     else:
@@ -295,7 +296,7 @@ class OpenAIBatchSummarizer(BaseSummarizer):
             # Strip trailing slash if present
             self.api_base = self.api_base.rstrip("/")
             # Security: restrict to localhost unless explicitly overridden
-            allow_remote = os.environ.get("JCODEMUNCH_ALLOW_REMOTE_SUMMARIZER", "0") == "1"
+            allow_remote = _config.get("allow_remote_summarizer", False)
             if not _is_localhost_url(self.api_base) and not allow_remote:
                 logger.warning(
                     "OPENAI_API_BASE points to non-localhost URL (%s). "

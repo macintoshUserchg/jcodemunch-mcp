@@ -213,31 +213,63 @@ Use jcodemunch-mcp for code lookup whenever available. Prefer symbol search, out
 
 ## Configuration
 
-All settings are controlled by environment variables. Defaults are chosen so that a fresh install works without touching any of them.
+Settings are controlled by a JSONC config file (`config.jsonc`) with env var fallbacks for backward compatibility. Defaults are chosen so that a fresh install works without any configuration.
 
-To see the current effective configuration:
+### Quick setup
 
 ```bash
-jcodemunch-mcp config           # show all settings
-jcodemunch-mcp config --check   # also verify prerequisites
+jcodemunch-mcp config --init       # create ~/.code-index/config.jsonc from template
+jcodemunch-mcp config              # show effective configuration
+jcodemunch-mcp config --check      # validate config + verify prerequisites
 ```
 
-`--check` validates that your AI provider package is installed, your index storage path is writable, and HTTP transport packages are present if you're using HTTP mode. Exits non-zero on any failure — useful for CI/CD or first-run scripts.
+`--check` validates that your config file is well-formed, your AI provider package is installed, your index storage path is writable, and HTTP transport packages are present. Exits non-zero on any failure — useful for CI/CD or first-run scripts.
 
-### Key variables
+### Config file locations
 
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `CODE_INDEX_PATH` | `~/.code-index/` | Where indexes are stored |
-| `JCODEMUNCH_USE_AI_SUMMARIES` | `true` | Set `false` to disable AI summaries globally |
-| `ANTHROPIC_API_KEY` | — | Enables Claude Haiku summaries (`pip install jcodemunch-mcp[anthropic]`) |
-| `GOOGLE_API_KEY` | — | Enables Gemini Flash summaries (`pip install jcodemunch-mcp[gemini]`) |
-| `OPENAI_API_BASE` | — | Local LLM endpoint (Ollama, LM Studio) |
-| `JCODEMUNCH_TRANSPORT` | `stdio` | Set `sse` or `streamable-http` for HTTP mode |
-| `JCODEMUNCH_HTTP_TOKEN` | — | Bearer token for HTTP transport auth |
-| `JCODEMUNCH_RATE_LIMIT` | `0` | Max requests/min per IP in HTTP mode (0 = off) |
-| `JCODEMUNCH_MAX_FOLDER_FILES` | 2,000 | File cap for `index_folder` |
-| `JCODEMUNCH_SHARE_SAVINGS` | `1` | Set `0` to disable anonymous token-savings telemetry |
+| Layer | Path | Purpose |
+|-------|------|---------|
+| Global | `~/.code-index/config.jsonc` | Server-wide defaults |
+| Project | `{project_root}/.jcodemunch.jsonc` | Per-project overrides |
+
+Project config merges over global config — closest to the work wins.
+
+### Token-control levers (reduce schema tokens per turn)
+
+| Config key | What it controls | Typical savings |
+|-----------|-----------------|----------------|
+| `disabled_tools` | Remove tools from schema entirely | ~100–400 tokens/tool |
+| `languages` | Shrink language enum + gate features | ~2–86 tokens/turn |
+| `meta_fields` | Filter `_meta` response fields | ~50–150 tokens/call |
+| `descriptions` | Control description verbosity | ~0–600 tokens/turn |
+
+See the full template for all available keys. Run `jcodemunch-mcp config --init` to generate one.
+
+### Deprecated env vars (v2.0 will remove)
+
+The following env vars still work but are deprecated. Config file values take priority:
+
+| Variable | Config key | Default |
+|----------|-----------|---------|
+| `JCODEMUNCH_USE_AI_SUMMARIES` | `use_ai_summaries` | `true` |
+| `JCODEMUNCH_MAX_FOLDER_FILES` | `max_folder_files` | `2000` |
+| `JCODEMUNCH_MAX_INDEX_FILES` | `max_index_files` | `10000` |
+| `JCODEMUNCH_STALENESS_DAYS` | `staleness_days` | `7` |
+| `JCODEMUNCH_MAX_RESULTS` | `max_results` | `500` |
+| `JCODEMUNCH_EXTRA_IGNORE_PATTERNS` | `extra_ignore_patterns` | `[]` |
+| `JCODEMUNCH_CONTEXT_PROVIDERS` | `context_providers` | `true` |
+| `JCODEMUNCH_REDACT_SOURCE_ROOT` | `redact_source_root` | `false` |
+| `JCODEMUNCH_STATS_FILE_INTERVAL` | `stats_file_interval` | `3` |
+| `JCODEMUNCH_SHARE_SAVINGS` | `share_savings` | `true` |
+| `JCODEMUNCH_SUMMARIZER_CONCURRENCY` | `summarizer_concurrency` | `4` |
+| `JCODEMUNCH_ALLOW_REMOTE_SUMMARIZER` | `allow_remote_summarizer` | `false` |
+| `JCODEMUNCH_RATE_LIMIT` | `rate_limit` | `0` |
+| `JCODEMUNCH_TRANSPORT` | `transport` | `stdio` |
+| `JCODEMUNCH_HOST` | `host` | `127.0.0.1` |
+| `JCODEMUNCH_PORT` | `port` | `8901` |
+| `JCODEMUNCH_LOG_LEVEL` | `log_level` | `WARNING` |
+
+AI provider keys (`ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, `OPENAI_API_BASE`, etc.) and `CODE_INDEX_PATH` are **always** read from env vars — they are never placed in config files.
 
 AI provider priority: Anthropic → Gemini → local LLM → signature fallback. The first key that is set wins. `jcodemunch-mcp config` shows which provider is active.
 

@@ -30,6 +30,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from .. import config as _config
+
 logger = logging.getLogger(__name__)
 
 _SAVINGS_FILE = "_savings.json"
@@ -38,14 +40,9 @@ _BYTES_PER_TOKEN = 4  # ~4 bytes per token (rough but consistent)
 _TELEMETRY_URL = "https://j.gravelle.us/APIs/savings/post.php"
 _FLUSH_INTERVAL = 3  # flush to disk every N calls
 
-def _read_stats_file_interval() -> int:
-    """Read JCODEMUNCH_STATS_FILE_INTERVAL env var. 0 = disabled, default 3."""
-    try:
-        return max(0, int(os.environ.get("JCODEMUNCH_STATS_FILE_INTERVAL", _FLUSH_INTERVAL)))
-    except (ValueError, TypeError):
-        return _FLUSH_INTERVAL
-
-_STATS_FILE_INTERVAL: int = _read_stats_file_interval()
+def _get_stats_file_interval() -> int:
+    """Read stats_file_interval from config. 0 = disabled, default 3."""
+    return max(0, _config.get("stats_file_interval", _FLUSH_INTERVAL))
 
 # Input token pricing ($ per token). Update as models reprice.
 # Source: https://claude.com/pricing#api (last verified 2026-03-09)
@@ -135,14 +132,15 @@ class _State:
     def _write_session_stats_locked(self, stats: dict, force: bool = False) -> None:
         """Write session stats to ~/.code-index/session_stats.json. Must be called with _lock held.
 
-        Writes are gated by JCODEMUNCH_STATS_FILE_INTERVAL (default 3 calls).
-        Set the env var to 0 to disable all session_stats.json writes.
+        Writes are gated by stats_file_interval config (default 3 calls).
+        Set to 0 to disable all session_stats.json writes.
         Pass force=True to bypass the interval check (e.g. explicit get_session_stats call).
         """
-        if _STATS_FILE_INTERVAL == 0 and not force:
+        stats_file_interval = _get_stats_file_interval()
+        if stats_file_interval == 0 and not force:
             return
         self._stats_call_count += 1
-        if not force and self._stats_call_count < _STATS_FILE_INTERVAL:
+        if not force and self._stats_call_count < stats_file_interval:
             return
         self._stats_call_count = 0
         path = _session_stats_path(self._base_path)
@@ -182,7 +180,7 @@ class _State:
             logger.debug("Failed to write savings data to %s", path, exc_info=True)
 
         # Send batched telemetry
-        if self._pending_telemetry > 0 and os.environ.get("JCODEMUNCH_SHARE_SAVINGS", "1") != "0":
+        if self._pending_telemetry > 0 and _config.get("share_savings", True):
             _share_savings(self._pending_telemetry, self._anon_id)
             self._pending_telemetry = 0
 

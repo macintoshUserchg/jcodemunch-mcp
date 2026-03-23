@@ -15,6 +15,7 @@ import pathspec
 
 logger = logging.getLogger(__name__)
 
+from .. import config as _config
 from ..parser import parse_file, LANGUAGE_EXTENSIONS, get_language_for_path
 from ..parser.context import discover_providers, enrich_symbols, collect_metadata
 from ..parser.imports import extract_imports
@@ -363,6 +364,11 @@ def index_folder(
     if not folder_path.is_dir():
         return {"success": False, "error": f"Path is not a directory: {path}"}
 
+    # Load and cache project-level config (.jcodemunch.jsonc) so subsequent
+    # config.get() calls within this indexing run use project overrides.
+    # This handles both first-time indexing and re-indexing of existing projects.
+    _config.load_project_config(str(folder_path))
+
     # Guard against dangerously broad roots.  A relative path like "." resolves
     # against the MCP server's CWD (not the caller's project directory), which
     # can be "/" or "~" when the server is launched by a system launcher.
@@ -391,8 +397,8 @@ def index_folder(
             "Prefer passing an absolute path to avoid unexpected behaviour."
         )
 
-    # Redact absolute path from responses when JCODEMUNCH_REDACT_SOURCE_ROOT=1
-    _redact = os.environ.get("JCODEMUNCH_REDACT_SOURCE_ROOT", "") == "1"
+    # Redact absolute path from responses when redact_source_root is enabled
+    _redact = _config.get("redact_source_root", False)
     _folder_display = folder_path.name if _redact else str(folder_path)
 
     max_files = get_max_folder_files()
@@ -688,9 +694,18 @@ def index_folder(
             return {"success": False, "error": "No source files found"}
 
         # Discover context providers (dbt, terraform, etc.)
-        _providers_enabled = context_providers and os.environ.get("JCODEMUNCH_CONTEXT_PROVIDERS", "1") != "0"
+        _providers_enabled = context_providers and _config.get("context_providers", True)
         active_providers = discover_providers(folder_path) if _providers_enabled else []
-        if active_providers:
+        # Gate SQL-dependent providers: when SQL is removed from languages config,
+        # filter out the dbt provider to avoid unnecessary detection overhead.
+        if active_providers and not _config.is_language_enabled("sql"):
+            active_providers = [p for p in active_providers if p.name != "dbt"]
+            if active_providers:
+                names = ", ".join(p.name for p in active_providers)
+                logger.info("Active context providers (SQL disabled): %s", names)
+            else:
+                logger.info("Active context providers: none (SQL disabled)")
+        elif active_providers:
             names = ", ".join(p.name for p in active_providers)
             logger.info("Active context providers: %s", names)
 

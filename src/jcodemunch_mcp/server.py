@@ -67,11 +67,8 @@ logger = logging.getLogger(__name__)
 
 
 def _default_use_ai_summaries() -> bool:
-    """Return the default for use_ai_summaries, respecting JCODEMUNCH_USE_AI_SUMMARIES env var."""
-    val = os.environ.get("JCODEMUNCH_USE_AI_SUMMARIES", "").strip().lower()
-    if val in ("0", "false", "no", "off"):
-        return False
-    return True  # default on
+    """Return the default for use_ai_summaries, respecting config (including env var fallback)."""
+    return config_module.get("use_ai_summaries", True)
 
 
 def _parse_watcher_flag(value: Optional[str]) -> bool:
@@ -770,7 +767,8 @@ def _apply_description_overrides(tools: list) -> None:
         tool_desc = descriptions.get(tool.name, {})
 
         # Override tool-level description
-        if tool_desc.get("_tool"):
+        # "_tool": "" means "use hardcoded minimal base only" (empty string override)
+        if "_tool" in tool_desc:
             tool.description = tool_desc["_tool"]
 
         # Override parameter descriptions (applies even if only _shared is set)
@@ -780,8 +778,11 @@ def _apply_description_overrides(tools: list) -> None:
                 if not isinstance(param_schema, dict):
                     continue
                 # Tool-specific override takes precedence over _shared
-                desc_override = tool_desc.get(param_name) or shared.get(param_name)
-                if desc_override:
+                # Empty string means "use hardcoded minimal base only"
+                desc_override = tool_desc.get(param_name)
+                if desc_override is None:
+                    desc_override = shared.get(param_name)
+                if desc_override is not None:
                     props[param_name] = {**param_schema, "description": desc_override}
 
 
@@ -821,6 +822,18 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         repo_arg = arguments.get("repo")
         if (name not in _EXCLUDED_FROM_STRICT and repo_arg):
             await asyncio.to_thread(await_freshness_if_strict, repo_arg, timeout_ms=500)
+
+        # Project-level tool disabling: check if tool is disabled for this project
+        # Global disabled tools are filtered out in list_tools() schema; project-level
+        # rejection happens here since schema is global (can't be changed per-project).
+        if config_module.is_tool_disabled(name, repo=repo_arg):
+            return [TextContent(type="text", text=json.dumps({
+                "error": (
+                    f"Tool '{name}' is disabled in this project's configuration. "
+                    f"Project-level tool disabling is set via the 'disabled_tools' key "
+                    f"in the .jcodemunch.jsonc file. Remove '{name}' from 'disabled_tools' to re-enable."
+                )
+            }, indent=2))]
 
         if name == "index_repo":
             result = await index_repo(
@@ -1110,15 +1123,19 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     _meta["stale_since_ms"] = None
             elif isinstance(meta_fields, list):
                 # Partial field inclusion - build _meta with only specified fields
-                result.pop("_meta", None)  # Clear existing _meta
+                # Save existing _meta (may contain tool-generated fields like timing_ms, tokens_saved)
+                existing_meta = result.pop("_meta", {})
                 _meta: dict[str, Any] = {}
-                _meta["powered_by"] = "jcodemunch-mcp by jgravelle · https://github.com/jgravelle/jcodemunch-mcp"
+                if "powered_by" in meta_fields:
+                    _meta["powered_by"] = "jcodemunch-mcp by jgravelle · https://github.com/jgravelle/jcodemunch-mcp"
                 repo_arg = arguments.get("repo")
                 if repo_arg:
                     status = get_reindex_status(repo_arg)
                     for field in meta_fields:
                         if field in status:
                             _meta[field] = status[field]
+                        elif field in existing_meta:
+                            _meta[field] = existing_meta[field]
                 elif name not in ("list_repos", "get_session_stats", "index_repo", "index_folder"):
                     from .reindex_state import is_any_reindex_in_progress
                     any_in_progress = is_any_reindex_in_progress()
@@ -1128,6 +1145,11 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                         _meta["reindex_in_progress"] = any_in_progress
                     if "stale_since_ms" in meta_fields:
                         _meta["stale_since_ms"] = None
+                # Preserve tool-generated fields (timing_ms, tokens_saved, candidates_scored)
+                # This runs for ALL tools, including list_repos, get_session_stats, etc.
+                for field in meta_fields:
+                    if field not in _meta and field in existing_meta:
+                        _meta[field] = existing_meta[field]
                 if _meta:
                     result["_meta"] = _meta
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
@@ -1451,10 +1473,10 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
 
 def _run_config(check: bool = False, init: bool = False) -> None:
     """Print the current effective configuration to stdout, or initialize config file."""
+    from . import config as _cfg
+
     # Handle --init
     if init:
-        from . import config as _cfg
-
         storage_path = os.environ.get("CODE_INDEX_PATH", str(Path.home() / ".code-index"))
         config_path = Path(storage_path) / "config.jsonc"
 
@@ -1469,6 +1491,10 @@ def _run_config(check: bool = False, init: bool = False) -> None:
         print(f"Created config template: {config_path}")
         print("Edit it to customize jcodemunch-mcp settings.")
         return
+
+    # Load config to get effective values
+    _cfg.load_config()
+
     tty = hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
     enc = getattr(sys.stdout, "encoding", "ascii") or "ascii"
 
@@ -1491,8 +1517,8 @@ def _run_config(check: bool = False, init: bool = False) -> None:
 
     COL = 36
 
-    def row(name, value, is_default=False):
-        tag = dim(" (default)") if is_default else ""
+    def row(name, value, source="default"):
+        tag = dim(f" [{source}]") if source != "default" else dim(" (default)")
         print(f"  {name:<{COL}} {value}{tag}")
 
     def env(var, default=""):
@@ -1502,28 +1528,97 @@ def _run_config(check: bool = False, init: bool = False) -> None:
     def section(title):
         print(f"\n{bold(title)}")
 
+    def cfg_row(name, key, default, source=None, fmt=None):
+        """Display a config value with source indicator."""
+        val = _cfg.get(key, default)
+        if fmt:
+            val = fmt(val)
+        effective_source = source or "default"
+        print(f"  {name:<{COL}} {val}{dim(f' [{effective_source}]')}")
+
     print(bold(f"jcodemunch-mcp {__version__} — configuration"))
 
-    # ── Core ──────────────────────────────────────────────────────────────
-    section("Core")
-    v, d = env("CODE_INDEX_PATH", str(Path.home() / ".code-index"))
-    row("CODE_INDEX_PATH", v, d)
-    v, d = env("JCODEMUNCH_MAX_FOLDER_FILES", "2000")
-    row("JCODEMUNCH_MAX_FOLDER_FILES", v, d)
-    v, d = env("JCODEMUNCH_MAX_INDEX_FILES", "10000")
-    row("JCODEMUNCH_MAX_INDEX_FILES", v, d)
-    v, d = env("JCODEMUNCH_STALENESS_DAYS", "7")
-    row("JCODEMUNCH_STALENESS_DAYS", v, d)
-    v, d = env("JCODEMUNCH_MAX_RESULTS", "500")
-    row("JCODEMUNCH_MAX_RESULTS", v, d)
-    extra = os.environ.get("JCODEMUNCH_EXTRA_IGNORE_PATTERNS", "")
-    row("JCODEMUNCH_EXTRA_IGNORE_PATTERNS", extra if extra else dim("(none)"), not extra)
+    # ── Config File ───────────────────────────────────────────────────────
+    section("Config File")
+    storage_path = os.environ.get("CODE_INDEX_PATH", str(Path.home() / ".code-index"))
+    config_path = Path(storage_path) / "config.jsonc"
+    if config_path.exists():
+        print(f"  {green(CHECK)} config.jsonc found: {config_path}")
+    else:
+        print(f"  {yellow(WARN)} config.jsonc not found: {config_path}")
+        print(f"  {dim('  Using defaults + env var fallbacks. Run `config --init` to create a config file.')}")
+
+    # ── Indexing ──────────────────────────────────────────────────────────
+    section("Indexing")
+    # Detect source for each config key
+    # Check the actual config file content (if exists) to determine if a key was
+    # explicitly set in config vs defaulted
+    _loaded_keys: set = set()
+    if config_path.exists():
+        try:
+            content = config_path.read_text(encoding="utf-8")
+            stripped = _cfg._strip_jsonc(content)
+            import json as _json
+            _loaded_keys = set(_json.loads(stripped).keys())
+        except Exception:
+            pass
+
+    def _detect_source(key, default):
+        if key in _loaded_keys:
+            return "config"
+        env_var = next((e for e, c in _cfg.ENV_VAR_MAPPING.items() if c == key), None)
+        if env_var and os.environ.get(env_var) is not None:
+            return "env"
+        return "default"
+
+    def _fmt_list(v):
+        if isinstance(v, list):
+            return f"[{len(v)} items]" if len(v) > 3 else str(v)
+        return str(v)
+
+    row("max_folder_files", _cfg.get("max_folder_files", 2000), _detect_source("max_folder_files", 2000))
+    row("max_index_files", _cfg.get("max_index_files", 10000), _detect_source("max_index_files", 10000))
+    row("staleness_days", _cfg.get("staleness_days", 7), _detect_source("staleness_days", 7))
+    row("max_results", _cfg.get("max_results", 500), _detect_source("max_results", 500))
+    patterns = _cfg.get("extra_ignore_patterns", [])
+    row("extra_ignore_patterns", _fmt_list(patterns) if patterns else dim("(none)"), _detect_source("extra_ignore_patterns", []))
+    exts = _cfg.get("extra_extensions", {})
+    row("extra_extensions", _fmt_list(exts) if exts else dim("(none)"), _detect_source("extra_extensions", {}))
+    row("context_providers", str(_cfg.get("context_providers", True)).lower(), _detect_source("context_providers", True))
+
+    # ── Meta Response Control ─────────────────────────────────────────────
+    section("Meta Response Control")
+    meta_fields = _cfg.get("meta_fields")
+    if meta_fields is None:
+        row("meta_fields", dim("(all fields)"), "default")
+    elif meta_fields == []:
+        row("meta_fields", dim("(none)"), "config")
+    else:
+        row("meta_fields", _fmt_list(meta_fields), _detect_source("meta_fields", None))
+
+    # ── Languages ─────────────────────────────────────────────────────────
+    section("Languages")
+    languages = _cfg.get("languages")
+    if languages is None:
+        row("languages", dim("(all languages)"), "default")
+    else:
+        row("languages", _fmt_list(languages), _detect_source("languages", None))
+
+    # ── Disabled Tools ────────────────────────────────────────────────────
+    section("Disabled Tools")
+    disabled = _cfg.get("disabled_tools", [])
+    row("disabled_tools", _fmt_list(disabled) if disabled else dim("(none)"), _detect_source("disabled_tools", []))
+
+    # ── Descriptions ──────────────────────────────────────────────────────
+    section("Descriptions")
+    descs = _cfg.get("descriptions", {})
+    row("descriptions", _fmt_list(descs) if descs else dim("(none)"), _detect_source("descriptions", {}))
 
     # ── AI Summarizer ─────────────────────────────────────────────────────
     section("AI Summarizer")
     use_ai_raw, use_ai_d = env("JCODEMUNCH_USE_AI_SUMMARIES", "true")
     use_ai = use_ai_raw.lower() not in ("false", "0", "no", "off")
-    row("JCODEMUNCH_USE_AI_SUMMARIES", str(use_ai).lower(), use_ai_d)
+    row("use_ai_summaries", str(use_ai).lower(), "env" if not use_ai_d else _detect_source("use_ai_summaries", True))
 
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
     google_key    = os.environ.get("GOOGLE_API_KEY", "")
@@ -1534,53 +1629,65 @@ def _run_config(check: bool = False, init: bool = False) -> None:
     elif anthropic_key:
         print(f"  Active provider:  {green('Anthropic')}  (ANTHROPIC_API_KEY set)")
         model, d = env("ANTHROPIC_MODEL", "claude-haiku-*")
-        row("  ANTHROPIC_MODEL", model, d)
+        row("  ANTHROPIC_MODEL", model, "env" if not d else "default")
     elif google_key:
         print(f"  Active provider:  {green('Google Gemini')}  (GOOGLE_API_KEY set)")
         model, d = env("GOOGLE_MODEL", "gemini-flash-*")
-        row("  GOOGLE_MODEL", model, d)
+        row("  GOOGLE_MODEL", model, "env" if not d else "default")
     elif openai_base:
         print(f"  Active provider:  {green('Local LLM')}  (OPENAI_API_BASE set)")
-        row("  OPENAI_API_BASE", openai_base, False)
+        row("  OPENAI_API_BASE", openai_base, "env")
         model, d = env("OPENAI_MODEL", "qwen3-coder")
-        row("  OPENAI_MODEL", model, d)
+        row("  OPENAI_MODEL", model, "env" if not d else "default")
         v, d = env("OPENAI_TIMEOUT", "60.0")
-        row("  OPENAI_TIMEOUT", v, d)
+        row("  OPENAI_TIMEOUT", v, "env" if not d else "default")
         v, d = env("OPENAI_BATCH_SIZE", "10")
-        row("  OPENAI_BATCH_SIZE", v, d)
+        row("  OPENAI_BATCH_SIZE", v, "env" if not d else "default")
         v, d = env("OPENAI_CONCURRENCY", "1")
-        row("  OPENAI_CONCURRENCY", v, d)
+        row("  OPENAI_CONCURRENCY", v, "env" if not d else "default")
         v, d = env("OPENAI_MAX_TOKENS", "500")
-        row("  OPENAI_MAX_TOKENS", v, d)
+        row("  OPENAI_MAX_TOKENS", v, "env" if not d else "default")
     else:
         print(f"  Active provider:  {yellow('none')} — no API key set, signature fallback active")
         print(f"  {dim('Set ANTHROPIC_API_KEY, GOOGLE_API_KEY, or OPENAI_API_BASE to enable')}")
 
-    # ── HTTP Transport ────────────────────────────────────────────────────
-    section("HTTP Transport")
-    transport, d = env("JCODEMUNCH_TRANSPORT", "stdio")
-    row("JCODEMUNCH_TRANSPORT", transport, d)
+    # ── Transport ──────────────────────────────────────────────────────────
+    section("Transport")
+    transport = _cfg.get("transport", "stdio")
+    row("transport", transport, _detect_source("transport", "stdio"))
     if transport != "stdio":
-        host, d = env("JCODEMUNCH_HOST", "127.0.0.1")
-        row("JCODEMUNCH_HOST", host, d)
-        port, d = env("JCODEMUNCH_PORT", "8901")
-        row("JCODEMUNCH_PORT", port, d)
+        row("host", _cfg.get("host", "127.0.0.1"), _detect_source("host", "127.0.0.1"))
+        row("port", _cfg.get("port", 8901), _detect_source("port", 8901))
         token = os.environ.get("JCODEMUNCH_HTTP_TOKEN", "")
-        row("JCODEMUNCH_HTTP_TOKEN", green("set") if token else yellow("not set"), not token)
-        rate, d = env("JCODEMUNCH_RATE_LIMIT", "0")
-        rate_label = f"{rate}/min per IP" if rate != "0" else "disabled"
-        row("JCODEMUNCH_RATE_LIMIT", rate_label, d)
+        row("JCODEMUNCH_HTTP_TOKEN", green("set") if token else yellow("not set"), "env")
+        rate = _cfg.get("rate_limit", 0)
+        rate_label = f"{rate}/min per IP" if rate != 0 else "disabled"
+        row("rate_limit", rate_label, _detect_source("rate_limit", 0))
     else:
         print(f"  {dim('stdio mode — HTTP transport vars ignored')}")
 
-    # ── Performance & Privacy ─────────────────────────────────────────────
-    section("Performance & Privacy")
-    v, d = env("JCODEMUNCH_STATS_FILE_INTERVAL", "3")
-    row("JCODEMUNCH_STATS_FILE_INTERVAL", "disabled" if v == "0" else f"every {v} calls", d)
-    v, d = env("JCODEMUNCH_SHARE_SAVINGS", "1")
-    row("JCODEMUNCH_SHARE_SAVINGS", green("enabled") if v != "0" else yellow("disabled"), d)
-    v, d = env("JCODEMUNCH_REDACT_SOURCE_ROOT", "0")
-    row("JCODEMUNCH_REDACT_SOURCE_ROOT", "enabled" if v == "1" else "disabled", d)
+    # ── Watcher ───────────────────────────────────────────────────────────
+    section("Watcher")
+    row("watch", str(_cfg.get("watch", False)).lower(), _detect_source("watch", False))
+    row("watch_debounce_ms", _cfg.get("watch_debounce_ms", 2000), _detect_source("watch_debounce_ms", 2000))
+    row("freshness_mode", _cfg.get("freshness_mode", "relaxed"), _detect_source("freshness_mode", "relaxed"))
+    row("claude_poll_interval", _cfg.get("claude_poll_interval", 5.0), _detect_source("claude_poll_interval", 5.0))
+
+    # ── Logging ──────────────────────────────────────────────────────────
+    section("Logging")
+    row("log_level", _cfg.get("log_level", "WARNING"), _detect_source("log_level", "WARNING"))
+    log_file = _cfg.get("log_file")
+    row("log_file", log_file if log_file else dim("(stderr)"), _detect_source("log_file", None))
+
+    # ── Privacy & Telemetry ───────────────────────────────────────────────
+    section("Privacy & Telemetry")
+    row("redact_source_root", str(_cfg.get("redact_source_root", False)).lower(), _detect_source("redact_source_root", False))
+    stats_int = _cfg.get("stats_file_interval", 3)
+    row("stats_file_interval", "disabled" if stats_int == 0 else f"every {stats_int} calls", _detect_source("stats_file_interval", 3))
+    share = _cfg.get("share_savings", True)
+    row("share_savings", green("enabled") if share else yellow("disabled"), _detect_source("share_savings", True))
+    row("summarizer_concurrency", _cfg.get("summarizer_concurrency", 4), _detect_source("summarizer_concurrency", 4))
+    row("allow_remote_summarizer", str(_cfg.get("allow_remote_summarizer", False)).lower(), _detect_source("allow_remote_summarizer", False))
 
     # ── --check ───────────────────────────────────────────────────────────
     if check:
@@ -1588,9 +1695,6 @@ def _run_config(check: bool = False, init: bool = False) -> None:
         issues: list[str] = []
 
         # Validate config.jsonc
-        from . import config as _cfg
-        storage_path = os.environ.get("CODE_INDEX_PATH", str(Path.home() / ".code-index"))
-        config_path = Path(storage_path) / "config.jsonc"
         config_issues = _cfg.validate_config(str(config_path))
         if config_issues:
             for issue in config_issues:
@@ -1600,7 +1704,7 @@ def _run_config(check: bool = False, init: bool = False) -> None:
             print(f"  {green(CHECK)} config.jsonc valid: {config_path}")
 
         # Storage writable?
-        storage = Path(os.environ.get("CODE_INDEX_PATH", Path.home() / ".code-index"))
+        storage = Path(storage_path)
         try:
             storage.mkdir(parents=True, exist_ok=True)
             probe = storage / ".jcm_probe"
@@ -1720,8 +1824,9 @@ def main(argv: Optional[list[str]] = None):
     serve_parser.add_argument(
         "--watcher-debounce",
         type=int,
-        default=int(os.environ.get("JCODEMUNCH_WATCH_DEBOUNCE_MS", "2000")),
-        help="Watcher debounce interval in ms (default: 2000, also via JCODEMUNCH_WATCH_DEBOUNCE_MS)",
+        default=None,
+        metavar="MS",
+        help="Watcher debounce interval in ms (default: from config, also via JCODEMUNCH_WATCH_DEBOUNCE_MS)",
     )
     serve_parser.add_argument(
         "--watcher-idle-timeout",
@@ -1756,7 +1861,7 @@ def main(argv: Optional[list[str]] = None):
     )
     serve_parser.add_argument(
         "--freshness-mode",
-        default=os.environ.get("JCODEMUNCH_FRESHNESS_MODE", "relaxed"),
+        default=None,
         choices=["relaxed", "strict"],
         help="Freshness mode: 'relaxed' (default) or 'strict' (block queries until watcher reindex finishes)",
     )
@@ -1774,8 +1879,9 @@ def main(argv: Optional[list[str]] = None):
     watch_parser.add_argument(
         "--debounce",
         type=int,
-        default=int(os.environ.get("JCODEMUNCH_WATCH_DEBOUNCE_MS", "2000")),
-        help="Debounce interval in milliseconds (default: 2000, also via JCODEMUNCH_WATCH_DEBOUNCE_MS)",
+        default=None,
+        metavar="MS",
+        help="Debounce interval in ms (default: from config, also via JCODEMUNCH_WATCH_DEBOUNCE_MS)",
     )
     watch_parser.add_argument(
         "--no-ai-summaries",
@@ -1858,14 +1964,16 @@ def main(argv: Optional[list[str]] = None):
     wc_parser.add_argument(
         "--poll-interval",
         type=float,
-        default=float(os.environ.get("JCODEMUNCH_CLAUDE_POLL_INTERVAL", "5")),
-        help="How often (in seconds) to poll git for worktrees (default: 5, only with --repos)",
+        default=None,
+        metavar="SECONDS",
+        help="Poll interval in seconds (default: from config, also via JCODEMUNCH_CLAUDE_POLL_INTERVAL)",
     )
     wc_parser.add_argument(
         "--debounce",
         type=int,
-        default=int(os.environ.get("JCODEMUNCH_WATCH_DEBOUNCE_MS", "2000")),
-        help="Debounce interval in milliseconds for file watching (default: 2000)",
+        default=None,
+        metavar="MS",
+        help="Debounce interval in ms for file watching (default: from config, also via JCODEMUNCH_WATCH_DEBOUNCE_MS)",
     )
     wc_parser.add_argument(
         "--no-ai-summaries",
@@ -1904,6 +2012,26 @@ def main(argv: Optional[list[str]] = None):
             init=getattr(args, "init", False),
         )
         return
+
+    # Apply config defaults for watcher keys: CLI args > config > env vars.
+    # config.load_config() is called inside each subcommand handler, but we need
+    # the values here to fill in None defaults from argparse.
+    # load_config() is idempotent so calling it early is safe.
+    config_module.load_config()
+
+    # --watcher-debounce (serve subcommand) / --debounce (watch, watch-claude)
+    # Only set if the attr exists on args and is None (not explicitly provided on CLI)
+    _debounce = config_module.get("watch_debounce_ms", 2000)
+    if getattr(args, "watcher_debounce", None) is None:
+        args.watcher_debounce = _debounce
+    if getattr(args, "debounce", None) is None:
+        args.debounce = _debounce
+
+    # --poll-interval (watch-claude subcommand)
+    if getattr(args, "poll_interval", None) is None:
+        args.poll_interval = config_module.get("claude_poll_interval", 5.0)
+
+    # --freshness-mode is only relevant for serve subcommand; handled there
 
     _setup_logging(args)
 
@@ -1944,6 +2072,7 @@ def main(argv: Optional[list[str]] = None):
             )
         )
     elif args.command == "index-file":
+        config_module.load_config()
         from .tools.index_file import index_file as _index_file
         import json as _json
 
@@ -1960,7 +2089,11 @@ def main(argv: Optional[list[str]] = None):
          # serve (default)
         # Load config at startup so config values are available to all tools
         config_module.load_config()
+        config_module.load_all_project_configs()
         from .reindex_state import set_freshness_mode
+        # Apply config default if --freshness-mode was not explicitly provided
+        if args.freshness_mode is None:
+            args.freshness_mode = config_module.get("freshness_mode", "relaxed")
         set_freshness_mode(args.freshness_mode)
         watcher_enabled = _get_watcher_enabled(args)
 

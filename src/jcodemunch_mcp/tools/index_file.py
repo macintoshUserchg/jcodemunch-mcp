@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from .. import config as _config
 from ..parser import LANGUAGE_EXTENSIONS, get_language_for_path
 from ..parser.context import discover_providers, collect_metadata
 from ..security import validate_path
@@ -129,8 +130,12 @@ def index_file(
         }
 
     # Discover context providers (same env var check as index_folder)
-    _providers_enabled = context_providers and os.environ.get("JCODEMUNCH_CONTEXT_PROVIDERS", "1") != "0"
+    _providers_enabled = context_providers and _config.get("context_providers", True)
     active_providers = discover_providers(source_root) if _providers_enabled else []
+    # Gate SQL-dependent providers: when SQL is removed from languages config,
+    # filter out the dbt provider to avoid unnecessary detection overhead.
+    if active_providers and not _config.is_language_enabled("sql"):
+        active_providers = [p for p in active_providers if p.name != "dbt"]
 
     # Shared pipeline: parse, enrich, summarize, extract metadata
     warnings: list[str] = []

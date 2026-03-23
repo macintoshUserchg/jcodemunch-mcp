@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 # Global config storage
 _GLOBAL_CONFIG: dict[str, Any] = {}
 _PROJECT_CONFIGS: dict[str, dict[str, Any]] = {}  # repo -> merged config
+_PROJECT_CONFIG_HASHES: dict[str, str] = {}  # repo -> content hash of .jcodemunch.jsonc
 _DEPRECATED_ENV_VARS_LOGGED: set[str] = set()  # Track warned vars
 
 ENV_VAR_MAPPING = {
@@ -101,7 +102,10 @@ CONFIG_TYPES = {
 
 
 def _strip_jsonc(text: str) -> str:
-    """Strip // and /* */ comments from JSONC, respecting quoted strings."""
+    """Strip // and /* */ comments from JSONC, respecting quoted strings.
+    
+    Also strips trailing commas (common in JSONC but invalid in JSON).
+    """
     result, i, n = [], 0, len(text)
     in_str = False
     while i < n:
@@ -151,7 +155,39 @@ def _strip_jsonc(text: str) -> str:
         else:
             result.append(ch)
             i += 1
-    return ''.join(result)
+    
+    # Post-process: strip trailing commas before } and ]
+    # This handles JSONC's allowance of trailing commas
+    output = ''.join(result)
+    # Use a simple state machine to strip trailing commas
+    final = []
+    j = 0
+    m = len(output)
+    while j < m:
+        ch = output[j]
+        if ch == '"' and (j == 0 or output[j-1] != '\\'):
+            # Find end of string
+            final.append(ch)
+            j += 1
+            while j < m:
+                final.append(output[j])
+                if output[j] == '"' and output[j-1] != '\\':
+                    j += 1
+                    break
+                j += 1
+        elif ch in ('}', ']'):
+            # Strip trailing whitespace and comma before this
+            while final and final[-1] in (' ', '\t', '\n', '\r'):
+                final.pop()
+            if final and final[-1] == ',':
+                final.pop()
+            final.append(ch)
+            j += 1
+        else:
+            final.append(ch)
+            j += 1
+    
+    return ''.join(final)
 
 
 def _validate_type(key: str, value: Any, expected_type: type | tuple) -> bool:
@@ -173,24 +209,48 @@ def load_config(storage_path: str | None = None) -> None:
         index_path = os.environ.get("CODE_INDEX_PATH", str(Path.home() / ".code-index"))
         config_path = Path(index_path) / "config.jsonc"
 
-    # Load config if exists
+    # Auto-create default config if missing
+    if not config_path.exists():
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        template = generate_template()
+        config_path.write_text(template, encoding="utf-8")
+        logger.info("Created default config at %s", config_path)
+
+    # Load config
+    _explicit_keys: set[str] = set()  # Track keys explicitly set in config file
     if config_path.exists():
         try:
-            content = config_path.read_text(encoding="utf-8")
+            content = config_path.read_text(encoding="utf-8-sig")  # utf-8-sig handles BOM
             stripped = _strip_jsonc(content)
             loaded = json.loads(stripped)
 
-            # Type validation
+            # Start with defaults, then overlay valid config values
+            _GLOBAL_CONFIG = DEFAULTS.copy()
             for key, value in loaded.items():
                 if key in CONFIG_TYPES:
                     if _validate_type(key, value, CONFIG_TYPES[key]):
-                        _GLOBAL_CONFIG[key] = value
+                        # Special validation for languages list
+                        if key == "languages" and isinstance(value, list):
+                            from .parser.languages import LANGUAGE_REGISTRY
+                            valid_langs = []
+                            for lang in value:
+                                if lang in LANGUAGE_REGISTRY:
+                                    valid_langs.append(lang)
+                                else:
+                                    logger.warning(
+                                        "Config key 'languages' contains unknown language '%s'. "
+                                        "Known languages: %s...",
+                                        lang, list(LANGUAGE_REGISTRY.keys())[:5]
+                                    )
+                            _GLOBAL_CONFIG[key] = valid_langs
+                        else:
+                            _GLOBAL_CONFIG[key] = value
+                        _explicit_keys.add(key)  # Track explicitly set keys
                     else:
                         logger.warning(
                             f"Config key '{key}' has invalid type. "
                             f"Expected {CONFIG_TYPES[key]}, got {type(value).__name__}. Using default."
                         )
-                        _GLOBAL_CONFIG[key] = DEFAULTS.get(key)
                 # Ignore unknown keys silently
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse config.jsonc: {e}")
@@ -201,8 +261,8 @@ def load_config(storage_path: str | None = None) -> None:
     else:
         _GLOBAL_CONFIG = DEFAULTS.copy()
 
-    # Apply env var fallback for keys not set in config
-    _apply_env_var_fallback()
+    # Apply env var fallback for keys not explicitly set in config
+    _apply_env_var_fallback(_explicit_keys)
 
 
 def _parse_env_value(value: str, expected_type: type | tuple) -> Any:
@@ -217,22 +277,53 @@ def _parse_env_value(value: str, expected_type: type | tuple) -> Any:
         elif expected_type == str:
             return value
         elif expected_type == list:
-            return json.loads(value)
+            # Try JSON array first (["*.log", "*.tmp"])
+            try:
+                return json.loads(value)
+            except (ValueError, json.JSONDecodeError):
+                # Fall back to legacy comma-separated format (*.log,*.tmp)
+                result = []
+                for token in value.split(","):
+                    token = token.strip()
+                    if token:
+                        result.append(token)
+                return result if result else None
         elif expected_type == dict:
-            return json.loads(value)
+            # Try JSON first (new format: {"ext": "lang", ...})
+            try:
+                return json.loads(value)
+            except (ValueError, json.JSONDecodeError):
+                # Fall back to legacy comma-separated format (.ext:lang,.ext:lang)
+                result = {}
+                for token in value.split(","):
+                    token = token.strip()
+                    if not token or ":" not in token:
+                        continue
+                    ext, _, lang = token.partition(":")
+                    ext = ext.strip()
+                    lang = lang.strip()
+                    if ext and lang:
+                        result[ext] = lang
+                return result if result else None
+        else:
+            logger.warning(f"Unknown config type %s for env var value: %s", expected_type, value)
+            return None
     except (ValueError, json.JSONDecodeError):
         logger.warning(f"Failed to parse env var value: {value}")
         return None
     return value
 
 
-def _apply_env_var_fallback() -> None:
-    """Apply deprecated env var fallback for keys not in config."""
+def _apply_env_var_fallback(explicit_keys: set[str] | None = None) -> None:
+    """Apply deprecated env var fallback for keys not explicitly set in config."""
     global _GLOBAL_CONFIG
 
+    if explicit_keys is None:
+        explicit_keys = set()
+
     for env_var, config_key in ENV_VAR_MAPPING.items():
-        # Skip if config key already set
-        if config_key in _GLOBAL_CONFIG:
+        # Skip if config key was explicitly set in config file
+        if config_key in explicit_keys:
             continue
 
         env_value = os.environ.get(env_var)
@@ -261,14 +352,36 @@ def get(key: str, default: Any = None, repo: str | None = None) -> Any:
     return _GLOBAL_CONFIG.get(key, default)
 
 
+def _content_hash(content: str) -> str:
+    """Compute SHA-256 hash of content (first 12 hex chars)."""
+    import hashlib
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()[:12]
+
+
 def load_project_config(source_root: str) -> None:
-    """Load and cache .jcodemunch.jsonc for a project. Called on first index."""
+    """Load and cache .jcodemunch.jsonc for a project.
+    
+    Uses hash-based caching: if the config file content hasn't changed,
+    the cached config is reused. This handles:
+    - First-time indexing (no cache)
+    - Incremental reindexes (cache hit, no parse)
+    - Config file edited (hash changed, reload)
+    - File touched but unchanged (hash same, no reload)
+    - Index dropped and recreated (cache still valid if file unchanged)
+    """
     project_config_path = Path(source_root) / ".jcodemunch.jsonc"
     repo_key = str(Path(source_root).resolve())
 
     if project_config_path.exists():
         try:
-            content = project_config_path.read_text(encoding="utf-8")
+            content = project_config_path.read_text(encoding="utf-8-sig")
+            content_hash = _content_hash(content)
+            
+            # Check if content unchanged (handles touch, mtime-only changes)
+            if repo_key in _PROJECT_CONFIGS:
+                if _PROJECT_CONFIG_HASHES.get(repo_key) == content_hash:
+                    return  # Cache is fresh
+            
             stripped = _strip_jsonc(content)
             project_config = json.loads(stripped)
 
@@ -283,11 +396,50 @@ def load_project_config(source_root: str) -> None:
                             f"Project config key '{key}' has invalid type. Using global default."
                         )
             _PROJECT_CONFIGS[repo_key] = merged
+            _PROJECT_CONFIG_HASHES[repo_key] = content_hash
         except Exception as e:
             logger.warning(f"Failed to load project config: {e}")
             _PROJECT_CONFIGS[repo_key] = _GLOBAL_CONFIG.copy()
     else:
-        _PROJECT_CONFIGS[repo_key] = _GLOBAL_CONFIG.copy()
+        # No config file - use global defaults
+        # Only cache if not already cached (avoids overwriting valid config)
+        if repo_key not in _PROJECT_CONFIGS:
+            _PROJECT_CONFIGS[repo_key] = _GLOBAL_CONFIG.copy()
+        _PROJECT_CONFIG_HASHES.pop(repo_key, None)
+
+
+def _list_repos_for_config() -> list[dict]:
+    """Get list of indexed repos for project config loading.
+    
+    Deferred import to avoid circular dependency at module load time.
+    """
+    from .storage.index_store import IndexStore
+    storage_path = os.environ.get("CODE_INDEX_PATH", str(Path.home() / ".code-index"))
+    store = IndexStore(base_path=storage_path)
+    return store.list_repos()
+
+
+def load_all_project_configs() -> None:
+    """Load project configs for all already-indexed local repos.
+    
+    Called once at server startup after load_config(). Discovers all indexed
+    local repos via list_repos() and loads their .jcodemunch.jsonc files.
+    Remote repos (empty source_root) are skipped.
+    """
+    if not _GLOBAL_CONFIG:
+        return
+    
+    try:
+        repos = _list_repos_for_config()
+        for repo_entry in repos:
+            source_root = repo_entry.get("source_root", "")
+            if not source_root:
+                continue
+            repo_key = str(Path(source_root).resolve())
+            if repo_key not in _PROJECT_CONFIGS:
+                load_project_config(source_root)
+    except Exception as e:
+        logger.warning("Failed to load project configs at startup: %s", e)
 
 
 def is_tool_disabled(tool_name: str, repo: str | None = None) -> bool:
@@ -309,14 +461,6 @@ def get_descriptions() -> dict:
     return _GLOBAL_CONFIG.get("descriptions", {})
 
 
-# Lazy import to avoid circular dependency
-def generate_template() -> str:
-    """Return default config.jsonc content."""
-    from .parser.languages import LANGUAGE_REGISTRY
-
-    languages_list = list(LANGUAGE_REGISTRY.keys())
-    lang_str = ", ".join(f'"{lang}"' for lang in languages_list)
-
 def validate_config(config_path: str) -> list[str]:
     """Validate a config.jsonc file and return a list of issue messages.
 
@@ -334,7 +478,7 @@ def validate_config(config_path: str) -> list[str]:
         return [f"Config file not found: {config_path}"]
 
     try:
-        content = path.read_text(encoding="utf-8")
+        content = path.read_text(encoding="utf-8-sig")  # utf-8-sig handles BOM
         stripped = _strip_jsonc(content)
         loaded = json.loads(stripped)
     except json.JSONDecodeError as e:
@@ -344,9 +488,11 @@ def validate_config(config_path: str) -> list[str]:
     for key, value in loaded.items():
         if key in CONFIG_TYPES:
             if not _validate_type(key, value, CONFIG_TYPES[key]):
+                expected = CONFIG_TYPES[key]
+                type_name = getattr(expected, "__name__", str(expected))
                 issues.append(
                     f"Config key '{key}' has invalid type: "
-                    f"expected {CONFIG_TYPES[key].__name__}, got {type(value).__name__}"
+                    f"expected {type_name}, got {type(value).__name__}"
                 )
         else:
             issues.append(f"Config key '{key}' is not recognized (unknown key)")
@@ -361,6 +507,28 @@ def generate_template() -> str:
     languages_list = list(LANGUAGE_REGISTRY.keys())
     lang_str = ", ".join(f'"{lang}"' for lang in languages_list)
 
+    # All available tools (for disabled_tools reference)
+    all_tools = [
+        "index_repo", "index_folder", "index_file", "list_repos",
+        "get_file_tree", "get_file_outline", "get_symbol", "get_file_content",
+        "get_symbols", "search_symbols", "search_text", "search_columns",
+        "get_repo_outline", "get_context_bundle", "get_session_stats",
+        "get_dependency_graph", "get_symbol_diff", "get_class_hierarchy",
+        "get_related_symbols", "get_blast_radius", "suggest_queries",
+        "find_importers", "find_references", "check_references",
+        "invalidate_cache", "wait_for_fresh",
+    ]
+    tools_str = "\n    //   ".join(f'"{t}",' for t in all_tools)
+
+    # All available meta_fields (for template documentation)
+    meta_fields_list = [
+        "timing_ms", "powered_by", "index_stale", "reindex_in_progress",
+        "stale_since_ms", "reindex_error", "reindex_failures",
+        "candidates_scored", "token_budget", "tokens_used", "tokens_remaining",
+    ]
+    # Commented-out example for meta_fields section in template (each field on its own line)
+    meta_str = "\n  //   ".join(f'"{mf}",' for mf in meta_fields_list)
+
     return f'''// jcodemunch-mcp configuration
 // Global: ~/.code-index/config.jsonc
 // Project: {{project_root}}/.jcodemunch.jsonc (optional, overrides global)
@@ -369,48 +537,84 @@ def generate_template() -> str:
 // Env vars still work as fallback but are deprecated.
 {{
   // === Indexing ===
-  "use_ai_summaries": true,
-  "max_folder_files": 2000,
-  "max_index_files": 10000,
-  "staleness_days": 7,
-  "max_results": 500,
-  "extra_ignore_patterns": [],
-  "extra_extensions": {{}},
-  "context_providers": true,
+  // "use_ai_summaries": true,
+  // "max_folder_files": 2000,
+  // "max_index_files": 10000,
+  // "staleness_days": 7,
+  // "max_results": 500,
+  // "extra_ignore_patterns": [],
+  // "extra_extensions": {{}},
+  // "context_providers": true,
 
   // === Meta Response Control ===
+  // Allowlist of _meta fields to include in responses.
+  // Empty list = no _meta at all (maximum token savings).
+  // Absent/null = all fields included (backward compatible default).
+  // Uncomment and set to a list of field names to include only those fields.
+  // Available fields:{meta_str}
+  // "meta_fields": [
+  //   "timing_ms",
+  //   "powered_by"
+  // ],
   "meta_fields": null,
 
   // === Languages ===
+  // All supported languages. Comment out to disable a language
+  // and its dependent features (e.g. "sql" disables dbt parsing
+  // and search_columns tool).
   "languages": [{lang_str}],
 
   // === Disabled Tools ===
+  // Global: tools listed here are removed from the schema entirely.
+  // Project: tools listed here are rejected at call_tool() with an
+  //   explanatory error (schema is global, can't be changed per-project).
+  // Default: empty (all tools enabled). Uncomment to disable specific tools.
+  // Available tools: {tools_str}
   "disabled_tools": [],
 
   // === Descriptions ===
-  "descriptions": {{}},
+  // Append text to shortened tool/param descriptions.
+  // Empty string = use hardcoded minimal base only.
+  // _tool = tool-level description, other keys = param names.
+  // _shared applies across all tools (tool-specific overrides _shared).
+  // Tools not listed here keep their full current descriptions unchanged.
+  "descriptions": {{
+    // === Example: Uncomment to enable ===
+    // "search_symbols": {{
+    //   "_tool": "",
+    //   "debug": "",
+    //   "detail_level": "",
+    //   "language": ""
+    // }},
+    // "find_importers": {{ "_tool": "" }},
+    // "find_references": {{ "_tool": "" }},
+    // "get_blast_radius": {{ "_tool": "" }},
+    // "get_context_bundle": {{ "_tool": "" }},
+    // "suggest_queries": {{ "_tool": "" }},
+    // "_shared": {{ "repo": "" }}
+  }}
 
   // === Transport ===
-  "transport": "stdio",
-  "host": "127.0.0.1",
-  "port": 8901,
-  "rate_limit": 0,
+  // "transport": "stdio",
+  // "host": "127.0.0.1",
+  // "port": 8901,
+  // "rate_limit": 0,
 
   // === Watcher ===
-  "watch": false,
-  "watch_debounce_ms": 2000,
-  "freshness_mode": "relaxed",
-  "claude_poll_interval": 5.0,
+  // "watch": false,
+  // "watch_debounce_ms": 2000,
+  // "freshness_mode": "relaxed",
+  // "claude_poll_interval": 5.0,
 
   // === Logging ===
-  "log_level": "WARNING",
-  "log_file": null,
+  // "log_level": "WARNING",
+  // "log_file": null,
 
   // === Privacy & Telemetry ===
-  "redact_source_root": false,
-  "stats_file_interval": 3,
-  "share_savings": true,
-  "summarizer_concurrency": 4,
-  "allow_remote_summarizer": false
+  // "redact_source_root": false,
+  // "stats_file_interval": 3,
+  // "share_savings": true,
+  // "summarizer_concurrency": 4,
+  // "allow_remote_summarizer": false
 }}
 '''

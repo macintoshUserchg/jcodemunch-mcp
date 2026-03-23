@@ -1,10 +1,10 @@
 """Search column metadata across indexed models."""
 
 import fnmatch
-import os
 import time
 from typing import Optional
 
+from .. import config as _config
 from ._utils import resolve_repo
 from ..storage.index_store import IndexStore
 from ..storage.token_tracker import estimate_savings, record_savings, cost_avoided
@@ -50,7 +50,7 @@ def search_columns(
         Dict with matching columns and _meta envelope.
     """
     start = time.perf_counter()
-    hard_cap = int(os.environ.get("JCODEMUNCH_MAX_RESULTS", "500"))
+    hard_cap = _config.get("max_results", 500)
     max_results = max(1, min(max_results, hard_cap))
 
     try:
