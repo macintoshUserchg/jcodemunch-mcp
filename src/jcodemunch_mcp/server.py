@@ -41,7 +41,7 @@ from .tools.suggest_queries import suggest_queries
 from .tools.search_columns import search_columns
 from .tools.get_context_bundle import get_context_bundle
 from .parser.symbols import VALID_KINDS
-from .reindex_state import wait_for_fresh_result
+from .reindex_state import wait_for_fresh_result, get_reindex_status, await_freshness_if_strict
 
 
 try:
@@ -1019,7 +1019,19 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             result = {"error": f"Unknown tool: {name}"}
         
         if isinstance(result, dict):
-            result.setdefault("_meta", {})["powered_by"] = "jcodemunch-mcp by jgravelle · https://github.com/jgravelle/jcodemunch-mcp"
+            _meta = result.setdefault("_meta", {})
+            _meta["powered_by"] = "jcodemunch-mcp by jgravelle · https://github.com/jgravelle/jcodemunch-mcp"
+            # Inject staleness fields for per-repo tools
+            repo_arg = arguments.get("repo")
+            if repo_arg:
+                status = get_reindex_status(repo_arg)
+                _meta["reindexing"] = status["reindexing"]
+                _meta["index_stale"] = status["reindexing"] or status["reindex_finished"]
+            elif name not in ("list_repos", "get_session_stats", "index_repo", "index_folder"):
+                # For non-repo tools, check if any reindex is in progress globally
+                from .reindex_state import is_any_reindex_in_progress
+                _meta["reindexing"] = is_any_reindex_in_progress()
+                _meta["index_stale"] = is_any_reindex_in_progress()
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     except KeyError as e:
