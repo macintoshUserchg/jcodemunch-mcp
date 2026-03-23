@@ -366,3 +366,218 @@ class TestEnvVarFallback:
 
             # Config value should be used, not env var
             assert get("max_folder_files") == 3000
+
+
+# ── Config file validation ────────────────────────────────────────────────────
+
+class TestConfigValidation:
+    """Test validate_config() function in config module."""
+
+    def test_validate_valid_config_returns_empty(self):
+        """Should return no issues for a valid config."""
+        from src.jcodemunch_mcp.config import validate_config, _GLOBAL_CONFIG
+
+        _GLOBAL_CONFIG.clear()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.jsonc"
+            config_path.write_text('{"max_folder_files": 5000}')
+            issues = validate_config(str(config_path))
+            assert issues == []
+
+    def test_validate_invalid_json_returns_parse_error(self):
+        """Should report JSON parse errors."""
+        from src.jcodemunch_mcp.config import validate_config, _GLOBAL_CONFIG
+
+        _GLOBAL_CONFIG.clear()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.jsonc"
+            config_path.write_text('{"max_folder_files": }')  # Invalid JSON
+            issues = validate_config(str(config_path))
+            assert any("parse" in i.lower() for i in issues)
+
+    def test_validate_type_mismatch_returns_warning(self):
+        """Should report type mismatches."""
+        from src.jcodemunch_mcp.config import validate_config, _GLOBAL_CONFIG
+
+        _GLOBAL_CONFIG.clear()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.jsonc"
+            config_path.write_text('{"max_folder_files": "not_an_int"}')
+            issues = validate_config(str(config_path))
+            assert any("type" in i.lower() or "invalid" in i.lower() for i in issues)
+
+    def test_validate_unknown_key_returns_warning(self):
+        """Should warn about unknown config keys."""
+        from src.jcodemunch_mcp.config import validate_config, _GLOBAL_CONFIG
+
+        _GLOBAL_CONFIG.clear()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.jsonc"
+            config_path.write_text('{"max_folder_files": 5000, "unknown_key": true}')
+            issues = validate_config(str(config_path))
+            assert any("unknown" in i.lower() for i in issues)
+
+    def test_validate_missing_file_returns_error(self):
+        """Should report when config file is missing."""
+        from src.jcodemunch_mcp.config import validate_config, _GLOBAL_CONFIG
+
+        _GLOBAL_CONFIG.clear()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            missing = Path(tmpdir) / "nonexistent.jsonc"
+            issues = validate_config(str(missing))
+            assert any("not found" in i.lower() for i in issues)
+
+
+class TestServerConfigCheck:
+    """Test that `config --check` validates the config file."""
+
+    def test_run_config_check_reports_config_parse_error(self, capsys, monkeypatch):
+        """Should report config file parse errors in --check output."""
+        from src.jcodemunch_mcp.config import _GLOBAL_CONFIG
+
+        _GLOBAL_CONFIG.clear()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.jsonc"
+            config_path.write_text('{"max_folder_files": }')  # Invalid JSON
+
+            monkeypatch.setenv("CODE_INDEX_PATH", tmpdir)
+
+            from src.jcodemunch_mcp.server import _run_config
+            with pytest.raises(SystemExit) as exc_info:
+                _run_config(check=True)
+            assert exc_info.value.code == 1
+
+            captured = capsys.readouterr().out
+            # Should mention config.jsonc and parse error
+            assert "config" in captured.lower()
+            assert "parse" in captured.lower()
+
+    def test_run_config_check_reports_type_error(self, capsys, monkeypatch):
+        """Should report config type errors in --check output."""
+        from src.jcodemunch_mcp.config import _GLOBAL_CONFIG
+
+        _GLOBAL_CONFIG.clear()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.jsonc"
+            config_path.write_text('{"max_folder_files": "wrong_type"}')
+
+            monkeypatch.setenv("CODE_INDEX_PATH", tmpdir)
+
+            from src.jcodemunch_mcp.server import _run_config
+            with pytest.raises(SystemExit) as exc_info:
+                _run_config(check=True)
+            assert exc_info.value.code == 1
+
+            captured = capsys.readouterr().out
+            assert "max_folder_files" in captured.lower()
+            assert "type" in captured.lower()
+
+    def test_run_config_check_passes_for_valid_config(self, capsys, monkeypatch):
+        """Should pass checks when config is valid."""
+        from src.jcodemunch_mcp.config import _GLOBAL_CONFIG
+
+        _GLOBAL_CONFIG.clear()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.jsonc"
+            config_path.write_text('{"max_folder_files": 5000}')
+
+            monkeypatch.setenv("CODE_INDEX_PATH", tmpdir)
+
+            from src.jcodemunch_mcp.server import _run_config
+            _run_config(check=True)
+
+            captured = capsys.readouterr().out
+            # Should NOT mention config errors
+            assert "config error" not in captured.lower()
+            assert "parse error" not in captured.lower()
+
+
+class TestLoadConfigWiredIntoMain:
+    """Test that load_config() is called during server startup."""
+
+    @pytest.mark.asyncio
+    async def test_main_calls_load_config_for_serve_command(self, monkeypatch, tmp_path):
+        """main() should call load_config() when serving."""
+        from src.jcodemunch_mcp.config import _GLOBAL_CONFIG, DEFAULTS
+
+        _GLOBAL_CONFIG.clear()
+        _GLOBAL_CONFIG.update(DEFAULTS)
+
+        # Create a temp config with a distinctive value
+        config_path = tmp_path / "config.jsonc"
+        config_path.write_text('{"max_folder_files": 9999}')
+        monkeypatch.setenv("CODE_INDEX_PATH", str(tmp_path))
+
+        # Track whether load_config was called
+        call_count = 0
+
+        # Import fresh — need to get the original reference before patching
+        import src.jcodemunch_mcp.config as cfg_module
+        real_load = cfg_module.load_config
+
+        def tracked_load(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            return real_load(*args, **kwargs)
+
+        cfg_module.load_config = tracked_load
+
+        # Patch sys.exit to prevent exit
+        monkeypatch.setattr("sys.exit", lambda code=0: None)
+
+        # Patch asyncio.run to avoid starting the actual server
+        async def fake_asyncio_run(coro):
+            # Just run the coroutine briefly, don't actually start the server
+            pass
+
+        monkeypatch.setattr("asyncio.run", fake_asyncio_run)
+
+        # Also patch the MCP server.run to prevent actual startup
+        import src.jcodemunch_mcp.server as server_module
+        async def fake_server_run(*args, **kwargs):
+            pass
+        monkeypatch.setattr(server_module.server, "run", fake_server_run)
+
+        from src.jcodemunch_mcp.server import main
+        main(["serve"])
+
+        assert call_count >= 1, "load_config should have been called during serve"
+
+    @pytest.mark.asyncio
+    async def test_config_loaded_before_list_tools(self, monkeypatch, tmp_path):
+        """After main() starts, config should be loaded and usable by list_tools."""
+        # Use the SAME module object that server.py imports
+        import src.jcodemunch_mcp.config as cfg_module
+        cfg_module._GLOBAL_CONFIG.clear()
+        cfg_module._GLOBAL_CONFIG.update({"max_folder_files": 2000})  # default
+
+        config_path = tmp_path / "config.jsonc"
+        config_path.write_text('{"max_folder_files": 7777}')
+        monkeypatch.setenv("CODE_INDEX_PATH", str(tmp_path))
+
+        monkeypatch.setattr("sys.exit", lambda code=0: None)
+
+        async def fake_asyncio_run(coro):
+            pass
+
+        monkeypatch.setattr("asyncio.run", fake_asyncio_run)
+
+        import src.jcodemunch_mcp.server as server_module
+        async def fake_server_run(*args, **kwargs):
+            pass
+        monkeypatch.setattr(server_module.server, "run", fake_server_run)
+
+        from src.jcodemunch_mcp.server import main
+        main(["serve"])
+
+        # After main() runs, config should reflect the file (not just defaults)
+        # cfg_module is the same object that server.py's config_module references
+        assert cfg_module.get("max_folder_files") == 7777

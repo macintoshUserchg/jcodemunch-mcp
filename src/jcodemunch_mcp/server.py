@@ -1587,6 +1587,18 @@ def _run_config(check: bool = False, init: bool = False) -> None:
         section("Checks")
         issues: list[str] = []
 
+        # Validate config.jsonc
+        from . import config as _cfg
+        storage_path = os.environ.get("CODE_INDEX_PATH", str(Path.home() / ".code-index"))
+        config_path = Path(storage_path) / "config.jsonc"
+        config_issues = _cfg.validate_config(str(config_path))
+        if config_issues:
+            for issue in config_issues:
+                print(f"  {red(CROSS)} config.jsonc: {issue}")
+            issues.append("config")
+        else:
+            print(f"  {green(CHECK)} config.jsonc valid: {config_path}")
+
         # Storage writable?
         storage = Path(os.environ.get("CODE_INDEX_PATH", Path.home() / ".code-index"))
         try:
@@ -1896,6 +1908,7 @@ def main(argv: Optional[list[str]] = None):
     _setup_logging(args)
 
     if args.command == "watch":
+        config_module.load_config()
         from .watcher import watch_folders
 
         use_ai = not args.no_ai_summaries and _default_use_ai_summaries()
@@ -1915,6 +1928,7 @@ def main(argv: Optional[list[str]] = None):
 
         handle_hook_event(event_type=args.event_type)
     elif args.command == "watch-claude":
+        config_module.load_config()
         from .watcher import watch_claude_worktrees
 
         use_ai = not args.no_ai_summaries and _default_use_ai_summaries()
@@ -1943,7 +1957,9 @@ def main(argv: Optional[list[str]] = None):
         if not result.get("success"):
             sys.exit(1)
     else:
-        # serve (default)
+         # serve (default)
+        # Load config at startup so config values are available to all tools
+        config_module.load_config()
         from .reindex_state import set_freshness_mode
         set_freshness_mode(args.freshness_mode)
         watcher_enabled = _get_watcher_enabled(args)

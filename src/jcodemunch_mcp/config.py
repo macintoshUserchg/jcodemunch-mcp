@@ -169,7 +169,9 @@ def load_config(storage_path: str | None = None) -> None:
     if storage_path:
         config_path = Path(storage_path) / "config.jsonc"
     else:
-        config_path = Path.home() / ".code-index" / "config.jsonc"
+        # Respect CODE_INDEX_PATH env var for config file location
+        index_path = os.environ.get("CODE_INDEX_PATH", str(Path.home() / ".code-index"))
+        config_path = Path(index_path) / "config.jsonc"
 
     # Load config if exists
     if config_path.exists():
@@ -308,6 +310,50 @@ def get_descriptions() -> dict:
 
 
 # Lazy import to avoid circular dependency
+def generate_template() -> str:
+    """Return default config.jsonc content."""
+    from .parser.languages import LANGUAGE_REGISTRY
+
+    languages_list = list(LANGUAGE_REGISTRY.keys())
+    lang_str = ", ".join(f'"{lang}"' for lang in languages_list)
+
+def validate_config(config_path: str) -> list[str]:
+    """Validate a config.jsonc file and return a list of issue messages.
+
+    Returns an empty list if the config is valid.
+    Checks:
+    - File exists
+    - JSONC parses to valid JSON
+    - All keys have correct types
+    - Unknown keys are flagged (warning, not error)
+    """
+    issues: list[str] = []
+    path = Path(config_path)
+
+    if not path.exists():
+        return [f"Config file not found: {config_path}"]
+
+    try:
+        content = path.read_text(encoding="utf-8")
+        stripped = _strip_jsonc(content)
+        loaded = json.loads(stripped)
+    except json.JSONDecodeError as e:
+        return [f"Config parse error: {e}"]
+
+    # Validate types
+    for key, value in loaded.items():
+        if key in CONFIG_TYPES:
+            if not _validate_type(key, value, CONFIG_TYPES[key]):
+                issues.append(
+                    f"Config key '{key}' has invalid type: "
+                    f"expected {CONFIG_TYPES[key].__name__}, got {type(value).__name__}"
+                )
+        else:
+            issues.append(f"Config key '{key}' is not recognized (unknown key)")
+
+    return issues
+
+
 def generate_template() -> str:
     """Return default config.jsonc content."""
     from .parser.languages import LANGUAGE_REGISTRY
