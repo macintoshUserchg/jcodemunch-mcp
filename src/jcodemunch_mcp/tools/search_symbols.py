@@ -13,6 +13,9 @@ from ._utils import resolve_repo
 
 BYTES_PER_TOKEN = 4
 
+# Fuzzy search: BM25 score below this auto-triggers the fuzzy pass
+_FUZZY_NEAR_MISS_THRESHOLD = 0.1
+
 # BM25 hyperparameters (standard Robertson et al. values)
 _BM25_K1 = 1.5
 _BM25_B = 0.75
@@ -172,6 +175,29 @@ def _bm25_breakdown(sym: dict, query_terms: list[str], idf: dict[str, float], av
     return out
 
 
+def _trigrams(text: str) -> frozenset:
+    """Return trigram frozenset for a lowercased string."""
+    s = text.lower()
+    if len(s) < 3:
+        return frozenset({s}) if s else frozenset()
+    return frozenset(s[i:i + 3] for i in range(len(s) - 2))
+
+
+def _edit_distance(a: str, b: str) -> int:
+    """Levenshtein edit distance (Wagner-Fischer, O(min(m,n)) space)."""
+    if len(a) > len(b):
+        a, b = b, a
+    la, lb = len(a), len(b)
+    row = list(range(la + 1))
+    for j in range(1, lb + 1):
+        prev, row[0] = row[0], j
+        for i in range(1, la + 1):
+            temp = row[i]
+            row[i] = min(row[i] + 1, row[i - 1] + 1, prev + (0 if a[i - 1] == b[j - 1] else 1))
+            prev = temp
+    return row[la]
+
+
 def search_symbols(
     repo: str,
     query: str,
@@ -182,6 +208,9 @@ def search_symbols(
     token_budget: Optional[int] = None,
     detail_level: str = "standard",
     debug: bool = False,
+    fuzzy: bool = False,
+    fuzzy_threshold: float = 0.4,
+    max_edit_distance: int = 2,
     storage_path: Optional[str] = None
 ) -> dict:
     """Search for symbols matching a query.
@@ -199,6 +228,13 @@ def search_symbols(
             only (~15 tokens each, ideal for discovery). "standard" returns signatures
             and summaries (default). "full" inlines source code, docstring, and end_line.
         debug: When True, include per-field score breakdown in each result.
+        fuzzy: Enable fuzzy matching. When True (or when BM25 confidence is low),
+            uses trigram overlap + edit distance as fallback. Fuzzy results carry
+            match_type="fuzzy", fuzzy_similarity, and edit_distance fields.
+        fuzzy_threshold: Minimum Jaccard trigram similarity (0.0–1.0) for fuzzy
+            candidates. Default 0.4.
+        max_edit_distance: Maximum Levenshtein distance for direct name matching
+            (catches typos even when trigrams don't match). Default 2.
         storage_path: Custom storage path.
 
     Returns:
@@ -266,6 +302,7 @@ def search_symbols(
         effective_limit = max_results
     heap: list[tuple[float, int, dict]] = []  # (score, candidates_scored, entry)
     candidates_scored = 0
+    max_bm25_score = 0.0
 
     for sym in candidates:
         if has_filters:
@@ -280,6 +317,8 @@ def search_symbols(
         if score <= 0:
             continue
 
+        if score > max_bm25_score:
+            max_bm25_score = score
         candidates_scored += 1
 
         if detail_level == "compact":
@@ -323,6 +362,67 @@ def search_symbols(
                 packed.append(entry)
                 used_bytes += b
         scored_results = packed
+
+    # Fuzzy pass: runs when explicitly requested OR when BM25 found nothing useful
+    run_fuzzy = fuzzy or (max_bm25_score < _FUZZY_NEAR_MISS_THRESHOLD)
+    if run_fuzzy:
+        for entry in scored_results:
+            entry["match_type"] = "exact"
+
+        query_lower = query.lower()
+        query_tris = _trigrams(query_lower)
+        existing_ids = {e["id"] for e in scored_results}
+        fuzzy_hits: list[tuple[dict, float, int]] = []
+
+        for sym in index.symbols:
+            if sym["id"] in existing_ids:
+                continue
+            if has_filters:
+                if kind and sym.get("kind") != kind:
+                    continue
+                if file_pattern and not fnmatch(sym.get("file", ""), file_pattern):
+                    continue
+                if language and sym.get("language") != language:
+                    continue
+            name_lower = sym.get("name", "").lower()
+            name_tris = _trigrams(name_lower)
+            union_size = len(query_tris | name_tris)
+            jac = len(query_tris & name_tris) / union_size if union_size else 0.0
+            ed = _edit_distance(query_lower, name_lower)
+            if jac < fuzzy_threshold and ed > max_edit_distance:
+                continue
+            fuzzy_hits.append((sym, jac, ed))
+
+        # Rank: lowest edit distance first, then highest Jaccard as tiebreaker
+        fuzzy_hits.sort(key=lambda x: (x[2], -x[1]))
+
+        for sym, jac, ed in fuzzy_hits[:max_results]:
+            if detail_level == "compact":
+                entry = {
+                    "id": sym["id"],
+                    "name": sym["name"],
+                    "kind": sym["kind"],
+                    "file": sym["file"],
+                    "line": sym["line"],
+                    "byte_length": sym.get("byte_length", 0),
+                }
+            else:
+                entry = {
+                    "id": sym["id"],
+                    "kind": sym["kind"],
+                    "name": sym["name"],
+                    "file": sym["file"],
+                    "line": sym["line"],
+                    "signature": sym["signature"],
+                    "summary": sym.get("summary", ""),
+                    "byte_length": sym.get("byte_length", 0),
+                }
+            entry["match_type"] = "fuzzy"
+            entry["fuzzy_similarity"] = round(jac, 3)
+            entry["edit_distance"] = ed
+            if debug:
+                entry["score"] = 0.0
+            scored_results.append(entry)
 
     # Full detail: inline source, docstring, end_line for each result
     if detail_level == "full":

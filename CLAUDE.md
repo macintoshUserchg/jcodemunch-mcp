@@ -1,7 +1,7 @@
 # jcodemunch-mcp — Project Brief
 
 ## Current State
-- **Version:** 1.11.8 (published to PyPI)
+- **Version:** 1.11.11 (published to PyPI)
 - **INDEX_VERSION:** 6
 - **Tests:** 1119 passed, 7 skipped
 - **Python:** >=3.10
@@ -221,6 +221,9 @@ Custom parsers (tree-sitter grammar lacks clean named fields):
 | 1.11.6 | UX: structured file-cap warnings — index_folder and index_repo now surface files_discovered, files_indexed, and files_skipped_cap fields plus a human-readable warning when the file cap is hit (previously a silent "note"); search_symbols and get_symbol_source single-symbol responses now include a _meta hint pointing to get_context_bundle; benchmark docs expanded with "Common Misreadings" section in METHODOLOGY.md and reproducible results table added to README |
 | 1.11.7 | Feat: check_freshness tool — compares git HEAD SHA at index time to current HEAD for locally indexed repos; returns fresh (bool), indexed_sha, current_sha, commits_behind; GitHub repos return is_local=False with clear message. get_repo_outline staleness check upgraded to SHA-based (accurate) with time-based fallback for GitHub/no-git repos; is_stale added to _meta; 8 new tests |
 | 1.11.8 | Feat: trusted_folders allowlist for index_folder() — new config key `trusted_folders` (+ `trusted_folders_whitelist_mode`) with env var fallbacks; whitelist mode (default) restricts indexing to named roots; blacklist mode blocks specific paths while trusting all others; path-aware matching (not string-prefix); project config supports `.`, `./subdir`, and bare relative paths; escape-attempt rejection; backward compatible (empty list = unchanged behavior) — contributed by tmeckel (PR #175) |
+| 1.11.9 | Fix: Windows CI trusted_folders test paths use `.as_posix()` to avoid backslash JSON escape errors in config.jsonc |
+| 1.11.10 | Feat: blast radius depth scoring — `get_blast_radius` now always returns `direct_dependents_count` and `overall_risk_score` (0.0–1.0); new `include_depth_scores=true` param adds `impact_by_depth` (files by BFS layer with per-depth risk scores); backward compatible; 14 new tests |
+| 1.11.11 | Feat: fuzzy symbol search — `search_symbols` gains `fuzzy`, `fuzzy_threshold`, `max_edit_distance` params; trigram Jaccard + Levenshtein fallback; auto-triggers when BM25 confidence is low; `match_type` field on results; no new deps; 21 new tests |
 
 ## Maintenance Practices
 

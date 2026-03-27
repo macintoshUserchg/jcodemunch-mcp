@@ -431,6 +431,21 @@ async def list_tools() -> list[Tool]:
                         "type": "boolean",
                         "description": "When true, each result includes a score_breakdown showing per-field scoring contributions (name_exact, name_contains, name_word_overlap, signature_phrase, signature_word_overlap, summary_phrase, summary_word_overlap, keywords, docstring_word_overlap). Also adds candidates_scored to _meta.",
                         "default": False
+                    },
+                    "fuzzy": {
+                        "type": "boolean",
+                        "description": "Enable fuzzy matching. When true, uses trigram overlap + Levenshtein distance as fallback when BM25 scores are low. Fuzzy results include match_type, fuzzy_similarity, and edit_distance fields.",
+                        "default": False
+                    },
+                    "fuzzy_threshold": {
+                        "type": "number",
+                        "description": "Minimum Jaccard trigram similarity (0.0–1.0) for fuzzy candidates. Lower values surface more candidates. Default 0.4.",
+                        "default": 0.4
+                    },
+                    "max_edit_distance": {
+                        "type": "integer",
+                        "description": "Maximum Levenshtein distance for direct name matching (catches typos). Default 2.",
+                        "default": 2
                     }
                 },
                 "required": ["repo", "query"]
@@ -717,6 +732,11 @@ async def list_tools() -> list[Tool]:
                         "type": "integer",
                         "description": "Import hops to traverse (1 = direct importers only, max 3). Default 1.",
                         "default": 1
+                    },
+                    "include_depth_scores": {
+                        "type": "boolean",
+                        "description": "When true, adds impact_by_depth (files grouped by hop distance) and per-depth risk scores. overall_risk_score and direct_dependents_count are always included. Default false.",
+                        "default": False
                     }
                 },
                 "required": ["repo", "symbol"]
@@ -970,6 +990,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                         token_budget=arguments.get("token_budget"),
                         detail_level=arguments.get("detail_level", "standard"),
                         debug=arguments.get("debug", False),
+                        fuzzy=arguments.get("fuzzy", False),
+                        fuzzy_threshold=arguments.get("fuzzy_threshold", 0.4),
+                        max_edit_distance=arguments.get("max_edit_distance", 2),
                         storage_path=storage_path,
                     )
                 )
@@ -1084,6 +1107,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     repo=arguments["repo"],
                     symbol=arguments["symbol"],
                     depth=arguments.get("depth", 1),
+                    include_depth_scores=arguments.get("include_depth_scores", False),
                     storage_path=storage_path,
                 )
             )

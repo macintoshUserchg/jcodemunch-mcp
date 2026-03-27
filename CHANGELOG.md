@@ -7,6 +7,16 @@ All notable changes to jcodemunch-mcp are documented here.
 ### Added
 - **Blast radius depth scoring** — `get_blast_radius` now always returns `direct_dependents_count` (depth-1 count) and `overall_risk_score` (0.0–1.0, weighted by hop distance using `1/depth^0.7`). New `include_depth_scores=true` parameter adds `impact_by_depth` (files grouped by BFS layer, each with a `risk_score`). Flat `confirmed`/`potential` lists are preserved unchanged (backward compatible). 14 new tests.
 
+## [1.11.11] - 2026-03-27
+
+### Added
+- **Fuzzy symbol search** — `search_symbols` gains three new parameters: `fuzzy` (bool, default `false`), `fuzzy_threshold` (float, default `0.4`), and `max_edit_distance` (int, default `2`). When enabled, a trigram Jaccard + Levenshtein pass runs as fallback when BM25 confidence is low (top score < 0.1) or when explicitly requested. Fuzzy results carry `match_type="fuzzy"`, `fuzzy_similarity`, and `edit_distance` fields; BM25 results carry `match_type="exact"`. Zero behavioral change when `fuzzy=false` (default). No new dependencies — pure stdlib (`frozenset` trigrams + Wagner-Fischer edit distance). 21 new tests.
+
+## [1.11.10] - 2026-03-27
+
+### Added
+- **Blast radius depth scoring** — `get_blast_radius` now always returns `direct_dependents_count` (depth-1 count) and `overall_risk_score` (0.0–1.0, weighted by hop distance using `1/depth^0.7`). New `include_depth_scores=true` parameter adds `impact_by_depth` (files grouped by BFS layer, each with a `risk_score`). Flat `confirmed`/`potential` lists are preserved unchanged (backward compatible). 14 new tests.
+
 ## [1.11.9] - 2026-03-27
 
 ### Fixed
