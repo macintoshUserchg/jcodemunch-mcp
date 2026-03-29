@@ -11,7 +11,7 @@ from jcodemunch_mcp.summarizer import (
     GeminiBatchSummarizer,
     OpenAIBatchSummarizer,
 )
-from jcodemunch_mcp.summarizer.batch_summarize import _create_summarizer
+from jcodemunch_mcp.summarizer.batch_summarize import _create_summarizer, get_model_name
 
 
 def test_extract_summary_from_docstring_simple():
@@ -800,3 +800,142 @@ def test_openai_summarizer_timeout_config():
         summarizer = OpenAIBatchSummarizer()
         assert summarizer.client is not None
         assert summarizer.client.timeout.read == 60.0
+
+
+# ---------------------------------------------------------------------------
+# Tests for get_model_name() and tri-state use_ai_summaries
+# ---------------------------------------------------------------------------
+
+
+def test_get_model_name_returns_none_when_empty():
+    """get_model_name() returns None when summarizer_model config is empty."""
+    with patch(
+        "jcodemunch_mcp.summarizer.batch_summarize._config.get",
+        side_effect=lambda k, d=None: "" if k == "summarizer_model" else d,
+    ):
+        assert get_model_name() is None
+
+
+def test_get_model_name_returns_value_when_set():
+    """get_model_name() returns the model string when summarizer_model is configured."""
+    with patch(
+        "jcodemunch_mcp.summarizer.batch_summarize._config.get",
+        side_effect=lambda k, d=None: "my-custom-model" if k == "summarizer_model" else d,
+    ):
+        assert get_model_name() == "my-custom-model"
+
+
+def test_get_model_name_strips_whitespace():
+    """get_model_name() strips surrounding whitespace from the model value."""
+    with patch(
+        "jcodemunch_mcp.summarizer.batch_summarize._config.get",
+        side_effect=lambda k, d=None: "  claude-haiku  " if k == "summarizer_model" else d,
+    ):
+        assert get_model_name() == "claude-haiku"
+
+
+def test_create_summarizer_disabled_when_false():
+    """_create_summarizer() returns None when use_ai_summaries is False (bool)."""
+    with patch(
+        "jcodemunch_mcp.summarizer.batch_summarize._config.get",
+        side_effect=lambda k, d=None: False if k == "use_ai_summaries" else d,
+    ):
+        assert _create_summarizer() is None
+
+
+def test_create_summarizer_disabled_when_string_false():
+    """_create_summarizer() returns None when use_ai_summaries is the string 'false'."""
+    with patch(
+        "jcodemunch_mcp.summarizer.batch_summarize._config.get",
+        side_effect=lambda k, d=None: "false" if k == "use_ai_summaries" else d,
+    ):
+        assert _create_summarizer() is None
+
+
+def test_create_summarizer_auto_mode_no_providers(monkeypatch):
+    """_create_summarizer() with use_ai_summaries='auto' returns None when no providers configured."""
+    for key in ("ANTHROPIC_API_KEY", "GOOGLE_API_KEY", "OPENAI_API_BASE", "MINIMAX_API_KEY", "ZHIPUAI_API_KEY"):
+        monkeypatch.delenv(key, raising=False)
+    with patch(
+        "jcodemunch_mcp.summarizer.batch_summarize._config.get",
+        side_effect=lambda k, d=None: "auto" if k == "use_ai_summaries" else d,
+    ):
+        assert _create_summarizer() is None
+
+
+def test_create_summarizer_auto_mode_detects_provider(monkeypatch):
+    """_create_summarizer() with use_ai_summaries='auto' picks up auto-detected provider."""
+    for key in ("ANTHROPIC_API_KEY", "GOOGLE_API_KEY", "OPENAI_API_BASE", "MINIMAX_API_KEY", "ZHIPUAI_API_KEY"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("ZHIPUAI_API_KEY", "test-key")
+    from jcodemunch_mcp import config as _cfg_module
+    _sentinel = object()
+    _orig = _cfg_module._GLOBAL_CONFIG.get("allow_remote_summarizer", _sentinel)
+    try:
+        _cfg_module._GLOBAL_CONFIG["allow_remote_summarizer"] = True
+        with patch(
+            "jcodemunch_mcp.summarizer.batch_summarize._config.get",
+            side_effect=lambda k, d=None: (
+                "auto" if k == "use_ai_summaries"
+                else "" if k == "summarizer_model"
+                else True if k == "allow_remote_summarizer"
+                else d
+            ),
+        ):
+            s = _create_summarizer()
+    finally:
+        if _orig is _sentinel:
+            _cfg_module._GLOBAL_CONFIG.pop("allow_remote_summarizer", None)
+        else:
+            _cfg_module._GLOBAL_CONFIG["allow_remote_summarizer"] = _orig
+    # GLM provider — OpenAIBatchSummarizer with the glm endpoint
+    assert s is not None
+    assert isinstance(s, OpenAIBatchSummarizer)
+    assert s.model == "glm-5"
+
+
+def test_create_summarizer_model_override_applied_to_glm(monkeypatch):
+    """summarizer_model config override is applied to the created GLM summarizer."""
+    for key in ("ANTHROPIC_API_KEY", "GOOGLE_API_KEY", "OPENAI_API_BASE", "MINIMAX_API_KEY", "ZHIPUAI_API_KEY"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("ZHIPUAI_API_KEY", "test-key")
+    from jcodemunch_mcp import config as _cfg_module
+    _sentinel = object()
+    _orig = _cfg_module._GLOBAL_CONFIG.get("allow_remote_summarizer", _sentinel)
+    try:
+        _cfg_module._GLOBAL_CONFIG["allow_remote_summarizer"] = True
+        with patch(
+            "jcodemunch_mcp.summarizer.batch_summarize._config.get",
+            side_effect=lambda k, d=None: (
+                "auto" if k == "use_ai_summaries"
+                else "glm-6-turbo" if k == "summarizer_model"
+                else True if k == "allow_remote_summarizer"
+                else d
+            ),
+        ):
+            s = _create_summarizer()
+    finally:
+        if _orig is _sentinel:
+            _cfg_module._GLOBAL_CONFIG.pop("allow_remote_summarizer", None)
+        else:
+            _cfg_module._GLOBAL_CONFIG["allow_remote_summarizer"] = _orig
+    assert s is not None
+    assert s.model == "glm-6-turbo"
+
+
+def test_create_summarizer_explicit_true_no_provider_warns_and_autodetects(monkeypatch, caplog):
+    """use_ai_summaries=True with no summarizer_provider logs warning and falls back to auto-detect."""
+    import logging
+    for key in ("ANTHROPIC_API_KEY", "GOOGLE_API_KEY", "OPENAI_API_BASE", "MINIMAX_API_KEY", "ZHIPUAI_API_KEY"):
+        monkeypatch.delenv(key, raising=False)
+    with patch(
+        "jcodemunch_mcp.summarizer.batch_summarize._config.get",
+        side_effect=lambda k, d=None: (
+            True if k == "use_ai_summaries"
+            else "" if k in ("summarizer_provider", "summarizer_model")
+            else d
+        ),
+    ), caplog.at_level(logging.WARNING, logger="jcodemunch_mcp.summarizer.batch_summarize"):
+        result = _create_summarizer()
+    assert result is None
+    assert "summarizer_provider is not set" in caplog.text

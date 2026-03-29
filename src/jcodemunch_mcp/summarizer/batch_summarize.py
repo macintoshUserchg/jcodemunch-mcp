@@ -467,20 +467,72 @@ class OpenAIBatchSummarizer(BaseSummarizer):
                     sym.summary = signature_fallback(sym)
 
 
+def get_model_name() -> Optional[str]:
+    """Return the configured summarizer_model override, or None if unset.
+
+    Reads the summarizer_model config key. Returns the stripped value, or None
+    if the key is empty or not set.
+    """
+    val = _config.get("summarizer_model", "")
+    if not val:
+        return None
+    return str(val).strip() or None
+
+
 def _create_summarizer() -> Optional[BaseSummarizer]:
-    """Return the appropriate summarizer based on explicit provider or API keys."""
-    name = get_provider_name()
+    """Return the appropriate summarizer based on tri-state use_ai_summaries + provider config.
+
+    Tri-state semantics for use_ai_summaries:
+    - False / "false" / "0" / "no" / "off": AI disabled — returns None immediately.
+    - True (bool, explicit): use summarizer_provider + summarizer_model from config;
+      falls back to auto-detect if provider is empty/unset.
+    - "auto" / "true" / anything else truthy: auto-detect by env vars (legacy behavior).
+    """
+    raw = _config.get("use_ai_summaries", "auto")
+
+    # Normalize to disabled / explicit / auto
+    if isinstance(raw, bool):
+        disabled = not raw
+        explicit_mode = raw  # True → explicit, False → disabled
+    else:
+        s = str(raw).strip().lower()
+        disabled = s in ("false", "0", "no", "off")
+        explicit_mode = False  # string "true"/"auto" → auto-detect
+
+    if disabled:
+        return None
+
+    model_override = get_model_name()
+
+    if explicit_mode:
+        # Use summarizer_provider from config; fall back to auto-detect if unset
+        explicit_provider = (_config.get("summarizer_provider", "") or "").lower().strip()
+        if explicit_provider not in _VALID_PROVIDERS or explicit_provider == "":
+            logger.warning(
+                "use_ai_summaries is 'true' but summarizer_provider is not set; "
+                "falling back to auto-detect"
+            )
+            name = get_provider_name()
+        else:
+            name = None if explicit_provider == "none" else explicit_provider
+    else:
+        name = get_provider_name()
+
     if name == "anthropic":
         s = BatchSummarizer()
+        if model_override:
+            s.model = model_override
         return s if s.client else None
     if name == "gemini":
         s = GeminiBatchSummarizer()
+        if model_override:
+            s.model = model_override
         return s if s.client else None
     if name == "openai":
         s = _make_openai_compat(
             api_key=os.environ.get("OPENAI_API_KEY", "local-llm"),
             base_url=os.environ.get("OPENAI_API_BASE", "https://api.openai.com/v1"),
-            model=os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
+            model=model_override or os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
         )
         return s if s.client else None
     if name == "minimax":
@@ -488,7 +540,7 @@ def _create_summarizer() -> Optional[BaseSummarizer]:
             s = _make_openai_compat(
                 api_key=os.environ.get("MINIMAX_API_KEY"),
                 base_url="https://api.minimax.io/v1",
-                model="minimax-m2.7",
+                model=model_override or "minimax-m2.7",
             )
         except ValueError:
             return None
@@ -498,7 +550,7 @@ def _create_summarizer() -> Optional[BaseSummarizer]:
             s = _make_openai_compat(
                 api_key=os.environ.get("ZHIPUAI_API_KEY"),
                 base_url="https://api.z.ai/api/paas/v4/",
-                model="glm-5",
+                model=model_override or "glm-5",
             )
         except ValueError:
             return None
