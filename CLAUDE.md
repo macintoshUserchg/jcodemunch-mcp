@@ -1,9 +1,9 @@
 # jcodemunch-mcp — Project Brief
 
 ## Current State
-- **Version:** 1.12.2 (published to PyPI)
+- **Version:** 1.12.3 (published to PyPI)
 - **INDEX_VERSION:** 6
-- **Tests:** 1298 passed, 7 skipped
+- **Tests:** 1302 passed, 7 skipped
 - **Python:** >=3.10
 
 ## Key Files
@@ -135,6 +135,7 @@ Custom parsers (tree-sitter grammar lacks clean named fields):
 | #165 | tmeckel | OpenAI Responses API support (OPENAI_WIRE_API=responses); merged v1.11.1 |
 | #168 | DrHayt | Debug logging for skip paths + exclude_secret_patterns config; merged v1.11.3 |
 | #182 | drax1222 | `.razor` (Blazor) file support — extension mapping + `@page`/`@inject` symbols; merged v1.12.2 |
+| #180 | MariusAdrian88 | Cross-process LRU cache invalidation (WAL mtime), max_files bug fix, config template cleanup; merged v1.12.3 |
 
 
 ## Roadmap / Backlog
@@ -234,6 +235,7 @@ Custom parsers (tree-sitter grammar lacks clean named fields):
 | 1.12.0 | Breaking: remove `check_freshness` + `wait_for_fresh` tools (~400 schema tokens/call saved); remove `_meta` staleness fields (`index_stale`, `reindex_in_progress`, `stale_since_ms`); fix watcher config layering (config.jsonc "watch" key was silently ignored); fix hash-cache miss reindex skip (`__cache_miss__` sentinel); fix flaky Windows tests (autouse conftest cache/config fixtures); new config-driven watcher params: `watch_paths`, `watch_extra_ignore`, `watch_follow_symlinks`, `watch_idle_timeout`, `watch_log`; net -880 lines, +25 tests — contributed by MariusAdrian88 (PR #179) |
 | 1.12.1 | Fix: `get_file_tree` token overflow on bloated indexes — results capped at `max_files` (default 500, exposed as tool param); truncated response includes `total_file_count` + hint to use `path_prefix`; `index_folder` warns when no root `.gitignore` found and ≥500 files indexed; 10 new tests — closes #178 |
 | 1.12.2 | Feat: `.razor` (Blazor component) file support — single-line extension mapping in languages.py; `_parse_razor_symbols` extended to emit `@page` routes and `@inject` directives as constant symbols; `Counter.razor` fixture + 8 new tests — contributed by drax1222 (PR #182) |
+| 1.12.3 | Fix: cross-process LRU cache invalidation — `_db_mtime_ns()` checks `max(db, db-wal)` mtime so WAL writes from watcher process are detected by MCP server's cache; `os.utime()` after save/incremental_save as belt-and-suspenders; fix `max_files` silently dropped in `call_tool` dispatch for `get_file_tree`; `file_tree_max_files` + `gitignore_warn_threshold` as first-class config keys; config template cleanup (remove stale tools, sort lists, add inline docs, add all missing keys); 5 new tests — contributed by MariusAdrian88 (PR #180) |
 
 ## Maintenance Practices
 

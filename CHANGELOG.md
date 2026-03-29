@@ -4,6 +4,19 @@ All notable changes to jcodemunch-mcp are documented here.
 
 ## [Unreleased]
 
+## [1.12.3] - 2026-03-29
+
+### Fixed
+- **Cross-process LRU cache invalidation** — SQLite WAL mode does not always update the `.db` file's mtime on commit. The watcher (a separate process) was writing new index data that the MCP server's in-memory cache never detected, causing agents to see stale results. New `_db_mtime_ns()` helper checks `max(db_mtime, db-wal_mtime)` so WAL writes are detected without an explicit cache eviction call. `os.utime()` added after `save_index()` and `incremental_save()` as a belt-and-suspenders measure; `os.utime()` runs *before* `_cache_put()` so the cached mtime matches what cross-process readers compute.
+- **`get_file_tree` silently ignored `max_files`** — the parameter was present in the MCP schema but was never passed through `call_tool` dispatch.
+- **Config template stale entries** — `wait_for_fresh` (removed v1.12.0) was still listed in `disabled_tools` template; staleness `_meta` fields (`index_stale`, `reindex_in_progress`, `stale_since_ms`) were still listed in `meta_fields` template.
+
+### Added
+- **`file_tree_max_files` config key** — configures the `get_file_tree` result cap via `config.jsonc` or `JCODEMUNCH_FILE_TREE_MAX_FILES` env var (default 500). Per-call `max_files` param still overrides.
+- **`gitignore_warn_threshold` config key** — configures the missing-`.gitignore` warning threshold in `index_folder` via `config.jsonc` or `JCODEMUNCH_GITIGNORE_WARN_THRESHOLD` env var (default 500). Set `0` to disable entirely.
+- **Config template overhaul** — all keys now have inline documentation; tools and meta_fields lists sorted alphabetically; all missing keys added (`trusted_folders_whitelist_mode`, `exclude_secret_patterns`, `path_map`, watcher params, transport docs); `version` field added for future migration tooling. Note: the template now defaults to `"meta_fields": []` (no `_meta` in responses) rather than `null` (all fields) — better for token efficiency; users who want `_meta` should uncomment the desired fields.
+- 5 new tests covering `_db_mtime_ns` (no-WAL, WAL-newer, WAL-older) and the full cross-process cache invalidation scenario (1302 total). Contributed by MariusAdrian88 (PR #180).
+
 ## [1.12.2] - 2026-03-29
 
 ### Added
