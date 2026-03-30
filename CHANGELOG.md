@@ -4,6 +4,11 @@ All notable changes to jcodemunch-mcp are documented here.
 
 ## [Unreleased]
 
+## [1.13.1] - 2026-03-30
+
+### Changed
+- **`get_repo_outline` 2-level directory grouping for large repos** — when a repository has more than 500 indexed files, `directories` now groups by two path components (e.g., `src/api/`, `src/models/`) instead of only the top-level directory. Results are capped at 40 entries (highest file-count dirs first). Small repos (≤ 500 files) retain the existing 1-level behavior. Agents navigating large monorepos get actionable directory hints rather than a single coarse bucket.
+
 ## [1.13.0] - 2026-03-30
 
 ### Added

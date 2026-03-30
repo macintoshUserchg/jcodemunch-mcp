@@ -45,6 +45,10 @@ def get_repo_outline(
         return {"error": f"Repository not indexed: {owner}/{name}"}
 
     # Compute directory-level stats
+    # For large repos, use 2-level grouping so agents get useful navigation hints.
+    _LARGE_REPO_THRESHOLD = 500  # files
+    _MAX_DIR_ENTRIES = 40
+
     dir_file_counts: Counter = Counter()
     for f in index.source_files:
         parts = f.split("/")
@@ -52,6 +56,23 @@ def get_repo_outline(
             dir_file_counts[parts[0] + "/"] += 1
         else:
             dir_file_counts["(root)"] += 1
+
+    if len(index.source_files) > _LARGE_REPO_THRESHOLD:
+        # Expand large top-level dirs into 2-level groupings
+        expanded: Counter = Counter()
+        for f in index.source_files:
+            parts = f.split("/")
+            if len(parts) >= 3:
+                key = parts[0] + "/" + parts[1] + "/"
+            elif len(parts) == 2:
+                key = parts[0] + "/"
+            else:
+                key = "(root)"
+            expanded[key] += 1
+        # Only use 2-level if it gives more granularity than 1-level
+        if len(expanded) > len(dir_file_counts):
+            # Cap at _MAX_DIR_ENTRIES, keeping highest-count dirs
+            dir_file_counts = Counter(dict(expanded.most_common(_MAX_DIR_ENTRIES)))
 
     # Symbol kind breakdown
     kind_counts: Counter = Counter()
