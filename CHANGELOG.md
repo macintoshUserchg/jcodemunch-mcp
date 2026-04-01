@@ -4,6 +4,17 @@ All notable changes to jcodemunch-mcp are documented here.
 
 ## [Unreleased]
 
+## [1.14.0] - 2026-04-01
+
+### Added
+- **`get_call_hierarchy(symbol_id, direction, depth)`** — new tool returning incoming callers and outgoing callees for any indexed symbol, N levels deep (default 3). Uses AST-derived detection: callers = symbols in importing files whose bodies mention the name; callees = imported symbols mentioned in the symbol's source body. No LSP required. Results include `{id, name, kind, file, line, depth}` per entry and `source: "ast"` in `_meta`.
+- **`get_impact_preview(symbol_id)`** — new tool answering "what breaks if I delete or rename this?". DFS over the call graph transitively, returns all affected symbols grouped by file (`affected_by_file`) with call-chain paths (`call_chains`) showing how each symbol is reached from the target.
+- **`_call_graph.py`** — shared internal module with `find_direct_callers`, `find_direct_callees`, `bfs_callers`, `bfs_callees` used by all call-graph tools.
+
+### Changed
+- **`get_blast_radius`** — new optional `call_depth` param (default 0, disabled). When `call_depth > 0`, adds `callers` list of symbols that actually call the target symbol (call-level analysis) alongside the existing import-level `confirmed`/`potential` lists. All existing fields unchanged; fully backwards-compatible.
+- **`find_references`** — new optional `include_call_chain` param (default false, singular mode only). When true, each reference entry gains `calling_symbols`: symbols in that file whose source bodies mention the identifier. Batch mode ignores this flag.
+
 ## [1.13.2] - 2026-03-31
 
 ### Fixed
