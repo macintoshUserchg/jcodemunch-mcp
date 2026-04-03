@@ -512,32 +512,48 @@ def index_folder(
             repo_name: str,
         ) -> None:
             """Fill in AI summaries and update the store. Checks generation counter to abandon stale work."""
-            from ..reindex_state import _get_state
+            from ..reindex_state import _get_state, get_deferred_save_lock
             from ._indexing_pipeline import deferred_summarize
 
             # Check 1: has a newer reindex started while we were parsing?
             if _get_state(repo_full).deferred_generation != gen:
+                logger.debug(
+                    "Deferred summarize gen=%d abandoned for %s (generation advanced before summarize)",
+                    gen, repo_full,
+                )
                 return
 
             summarized = deferred_summarize(symbols, file_contents, use_ai_summaries=True)
             if not summarized:
                 return
 
-            # Check 2: has another reindex started while we were summarizing?
-            if _get_state(repo_full).deferred_generation != gen:
-                return
+            # Check 2 + save are held under the deferred-save lock (T7).
+            # mark_reindex_start also acquires this lock before bumping the generation,
+            # so the check and the write are atomic with respect to new reindexes:
+            # either we write before the new gen is bumped, or we see the new gen and abort.
+            save_lock = get_deferred_save_lock(repo_full)
+            with save_lock:
+                if _get_state(repo_full).deferred_generation != gen:
+                    logger.debug(
+                        "Deferred summarize gen=%d abandoned for %s (generation advanced before save)",
+                        gen, repo_full,
+                    )
+                    return
 
-            # Update only the symbol summaries (empty change lists → INSERT OR REPLACE updates existing rows)
-            try:
-                store.incremental_save(
-                    owner=owner, name=repo_name,
-                    changed_files=[], new_files=[], deleted_files=[],
-                    new_symbols=summarized,
-                    raw_files={},
-                )
-                logger.info("Deferred AI summarization saved %d symbols for %s", len(summarized), repo_full)
-            except Exception as e:
-                logger.warning("Deferred summarization failed for %s: %s", repo_full, e)
+                # Update only the symbol summaries (empty change lists → INSERT OR REPLACE updates existing rows)
+                try:
+                    store.incremental_save(
+                        owner=owner, name=repo_name,
+                        changed_files=[], new_files=[], deleted_files=[],
+                        new_symbols=summarized,
+                        raw_files={},
+                    )
+                    logger.info(
+                        "Deferred AI summarization gen=%d saved %d symbols for %s",
+                        gen, len(summarized), repo_full,
+                    )
+                except Exception as e:
+                    logger.warning("Deferred summarization failed for %s: %s", repo_full, e)
 
         # ── Fast path: watcher-driven incremental reindex ──
         # When the watcher provides the exact change set, skip full directory

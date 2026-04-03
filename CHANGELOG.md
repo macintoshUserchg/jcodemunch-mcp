@@ -4,6 +4,11 @@ All notable changes to jcodemunch-mcp are documented here.
 
 ## [Unreleased]
 
+## [1.21.15] - 2026-04-02
+
+### Fixed
+- **Deferred-summarize write-lock race eliminated (T7)** — a narrow but real race existed between the deferred summarization thread's generation check ("check 2") and its `incremental_save` call. A concurrent `mark_reindex_start` could bump `deferred_generation` and write a fresh index between those two points; the deferred thread would then overwrite it with stale AI summaries from the previous parse generation. Fixed by introducing a per-repo `threading.Lock` (`_repo_deferred_save_locks` in `reindex_state.py`). The deferred thread holds this lock across check 2 + save; `mark_reindex_start` holds it while bumping `deferred_generation`. This makes check-and-save atomic with respect to generation bumps: either the deferred thread saves before the new generation is written, or it sees the new generation and self-aborts. Added `gen=N` to deferred-summarize log messages so abandoned and completed saves are distinguishable in debug output (pre-T7 instrumentation).
+
 ## [1.21.14] - 2026-04-02
 
 ### Fixed

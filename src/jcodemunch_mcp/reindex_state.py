@@ -60,6 +60,11 @@ _repo_states: dict[str, _RepoState] = {}
 # Per-repo threading.Events for signaling reindex completion.
 # Separate from _RepoState to avoid dataclass+threading.Event typing issues.
 _repo_events: dict[str, threading.Event] = {}
+# Per-repo save locks — held by deferred-summarize thread during (check → save) and
+# by mark_reindex_start while bumping deferred_generation.  This makes check-2 + save
+# in _run_deferred_summarize atomic with respect to generation bumps, closing the race
+# window where a stale deferred save could overwrite a fresh index (T7).
+_repo_deferred_save_locks: dict[str, threading.Lock] = {}
 
 # Freshness mode: "relaxed" (default) or "strict"
 # strict = await_freshness_if_strict() blocks callers until reindex is done
@@ -76,24 +81,47 @@ def _get_state(repo: str) -> _RepoState:
             _repo_states[repo] = _RepoState()
             _repo_events[repo] = threading.Event()
             _repo_events[repo].set()  # starts signaled (not reindexing)
+            _repo_deferred_save_locks[repo] = threading.Lock()
         return _repo_states[repo]
+
+
+def get_deferred_save_lock(repo: str) -> threading.Lock:
+    """Return the per-repo deferred-save lock, creating it if needed.
+
+    Callers:
+    - _run_deferred_summarize: acquires lock around check-2 + incremental_save
+    - mark_reindex_start: acquires lock while bumping deferred_generation
+
+    Lock order: deferred_save_lock → _states_lock (never reversed).
+    """
+    with _states_lock:
+        if repo not in _repo_deferred_save_locks:
+            _repo_deferred_save_locks[repo] = threading.Lock()
+        return _repo_deferred_save_locks[repo]
 
 
 # ── Reindex lifecycle ─────────────────────────────────────────────────────────
 
 def mark_reindex_start(repo: str) -> None:
     """Mark a repo as actively reindexing."""
-    with _states_lock:
-        state = _get_state(repo)
-        state.reindexing = True
-        state.reindex_finished = False
-        state.reindex_error = None
-        state.last_reindex_start = time.monotonic()
-        state.deferred_generation += 1
-        # Record when the index first became stale (don't overwrite if already set)
-        if state.stale_since is None:
-            state.stale_since = time.monotonic()
-        _repo_events[repo].clear()
+    # Acquire the deferred-save lock before bumping deferred_generation.
+    # This ensures any in-flight deferred save with the old generation either:
+    #   (a) sees the new generation in its check and self-aborts, or
+    #   (b) fully completes before this generation bump, so it can't clobber
+    #       the index that the new reindex is about to write (T7).
+    save_lock = get_deferred_save_lock(repo)
+    with save_lock:
+        with _states_lock:
+            state = _get_state(repo)
+            state.reindexing = True
+            state.reindex_finished = False
+            state.reindex_error = None
+            state.last_reindex_start = time.monotonic()
+            state.deferred_generation += 1
+            # Record when the index first became stale (don't overwrite if already set)
+            if state.stale_since is None:
+                state.stale_since = time.monotonic()
+            _repo_events[repo].clear()
 
 
 def mark_reindex_done(repo: str, result: Optional[dict] = None) -> None:
