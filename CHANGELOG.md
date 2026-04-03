@@ -4,6 +4,20 @@ All notable changes to jcodemunch-mcp are documented here.
 
 ## [Unreleased]
 
+## [1.21.18] - 2026-04-02
+
+### Added
+- **Correctness fixture library (T12)** — `tests/conftest.py` now exports three shared pytest fixtures (`small_index`, `medium_index`, `hierarchy_index`) that build deterministic synthetic Python repos with documented ground-truth expected outputs. Used across multiple test modules as the canonical in-process test corpus.
+- **Tests for `get_class_hierarchy` (T13)** — 22 new tests in `tests/test_class_hierarchy.py` covering: `_parse_bases` unit tests (Python single/multi base, Java extends/implements, combined, lowercase filter, empty); hierarchy BFS error cases (repo not indexed, class not found); ancestor direction (no ancestors for root, direct parent, transitive chain, BFS nearest-first order); descendant direction (all descendants of root, direct children, leaf has none); meta fields (case-insensitive lookup, timing, class info, external base recorded as `"(external)"`).
+- **Tests for `get_related_symbols` (T13)** — 14 new tests in `tests/test_related_symbols.py` covering: `_tokenize_name` unit tests (snake_case, camelCase, single word, short-token filter, lowercase); error cases (repo not indexed, symbol not found); same-file grouping (co-located symbols are related, scores positive); name-token overlap scoring; `max_results` cap; meta fields (timing, target symbol in response, required entry fields).
+- **Tests for `get_symbol_diff` (T13)** — 15 new tests in `tests/test_symbol_diff.py` covering: error cases (repo A not indexed, repo B not indexed); added symbols (detected, count matches list); removed symbols (detected, count matches list); unchanged symbols (not in added/removed, identical repo → all unchanged); changed symbols (signature change detected, both signatures present); meta fields (timing, symbol counts, repo identifiers).
+- **Tests for `suggest_queries` (T13)** — 11 new tests in `tests/test_suggest_queries.py` covering: error cases (repo not indexed, empty index); small repo stats (symbol count, file count, kind distribution, language distribution, example queries non-empty, required query fields); medium repo stats (file count, most_imported file structure, class+function kinds, repo field, timing meta).
+- **Tests for rate-limit middleware (T13)** — 10 new tests in `tests/test_rate_limit.py` covering: factory returns `None` when `JCODEMUNCH_RATE_LIMIT` is 0, unset, invalid, or negative; returns non-`None` `Middleware` when limit is positive; sliding-window bucket logic: under-limit all allowed, over-limit rejected, expired entries evicted, limit=1 allows first denies second.
+- **In-process perf benchmarks with latency budgets (T14)** — `tests/test_search_perf.py` rewritten from an external-index-dependent skip-if-not-indexed pattern to a fully self-contained suite. Builds a 5-file, 20+ symbol synthetic repo at module scope. New latency assertions: cold search < 2000 ms, warm search < 500 ms (BM25 cache benefit). Correctness assertions: result order stable across two consecutive calls, scores stable with `debug=True`, relevant symbol appears in top-5 for known query, all queries return non-empty results. Zero `pytest.skip` in the file.
+
+### Changed
+- **`tests/test_search_perf.py`** — removed `_require_index()` / `pytest.skip` pattern that caused CI-skip when `jcodemunch-mcp` was not indexed locally. Tests now run unconditionally against the synthetic in-process index.
+
 ## [1.21.17] - 2026-04-02
 
 ### Fixed

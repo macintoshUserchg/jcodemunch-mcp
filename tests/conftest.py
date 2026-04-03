@@ -46,3 +46,116 @@ def _reset_global_config():
         cfg._REPO_PATH_CACHE.clear()
     except ImportError:
         pass
+
+
+# ---------------------------------------------------------------------------
+# T12 — Correctness fixture library
+# ---------------------------------------------------------------------------
+# Small, medium, and graph-rich synthetic repos used by multiple test modules.
+# Each fixture builds a deterministic synthetic codebase with ground-truth
+# expected outputs documented inline.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def small_index(tmp_path):
+    """Small synthetic Python repo: 1 file, 3 symbols.
+
+    Ground truth:
+        symbols: MAX_RETRIES (constant), add (function), subtract (function)
+        files:   ["utils.py"]
+        kinds:   {"constant": 1, "function": 2}
+    """
+    from jcodemunch_mcp.tools.index_folder import index_folder
+
+    src = tmp_path / "src"
+    store = tmp_path / "store"
+    src.mkdir()
+    store.mkdir()
+    (src / "utils.py").write_text(
+        "MAX_RETRIES = 3\n\n"
+        "def add(a, b):\n"
+        "    return a + b\n\n"
+        "def subtract(a, b):\n"
+        "    return a - b\n"
+    )
+    r = index_folder(str(src), use_ai_summaries=False, storage_path=str(store))
+    assert r["success"] is True
+    return {"repo": r["repo"], "store": str(store), "src": str(src)}
+
+
+@pytest.fixture
+def medium_index(tmp_path):
+    """Medium synthetic Python repo: 3 files with cross-imports.
+
+    Ground truth:
+        files:   models.py, service.py, api.py
+        classes: User, Product (models.py)
+        functions: get_user, create_user (service.py), handle_request (api.py)
+        imports: service.py imports from models; api.py imports from models + service
+        most_imported: models.py (imported by 2 files)
+    """
+    from jcodemunch_mcp.tools.index_folder import index_folder
+
+    src = tmp_path / "src"
+    store = tmp_path / "store"
+    src.mkdir()
+    store.mkdir()
+    (src / "models.py").write_text(
+        "class User:\n"
+        "    \"\"\"Represents a user.\"\"\"\n"
+        "    pass\n\n"
+        "class Product:\n"
+        "    \"\"\"Represents a product.\"\"\"\n"
+        "    pass\n"
+    )
+    (src / "service.py").write_text(
+        "from models import User\n\n"
+        "def get_user(user_id):\n"
+        "    return User()\n\n"
+        "def create_user(name):\n"
+        "    return User()\n"
+    )
+    (src / "api.py").write_text(
+        "from models import User, Product\n"
+        "from service import get_user\n\n"
+        "def handle_request(req):\n"
+        "    return get_user(req)\n"
+    )
+    r = index_folder(str(src), use_ai_summaries=False, storage_path=str(store))
+    assert r["success"] is True
+    return {"repo": r["repo"], "store": str(store), "src": str(src)}
+
+
+@pytest.fixture
+def hierarchy_index(tmp_path):
+    """Python class hierarchy: Animal -> Mammal -> Dog, Cat.
+
+    Ground truth:
+        Animal:  0 ancestors, 1 descendant (Mammal) [via Mammal, transitively Dog+Cat]
+        Mammal:  1 ancestor (Animal), 2 direct descendants (Dog, Cat)
+        Dog:     2 ancestors (Mammal, Animal), 0 descendants
+        Cat:     2 ancestors (Mammal, Animal), 0 descendants
+    """
+    from jcodemunch_mcp.tools.index_folder import index_folder
+
+    src = tmp_path / "src"
+    store = tmp_path / "store"
+    src.mkdir()
+    store.mkdir()
+    (src / "animals.py").write_text(
+        "class Animal:\n"
+        "    \"\"\"Base animal class.\"\"\"\n"
+        "    pass\n\n"
+        "class Mammal(Animal):\n"
+        "    \"\"\"A warm-blooded animal.\"\"\"\n"
+        "    pass\n\n"
+        "class Dog(Mammal):\n"
+        "    \"\"\"A domestic dog.\"\"\"\n"
+        "    pass\n\n"
+        "class Cat(Mammal):\n"
+        "    \"\"\"A domestic cat.\"\"\"\n"
+        "    pass\n"
+    )
+    r = index_folder(str(src), use_ai_summaries=False, storage_path=str(store))
+    assert r["success"] is True
+    return {"repo": r["repo"], "store": str(store), "src": str(src)}
