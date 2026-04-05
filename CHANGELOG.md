@@ -4,6 +4,21 @@ All notable changes to jcodemunch-mcp are documented here.
 
 ## [Unreleased]
 
+## [1.22.0] - 2026-04-05
+
+### Added
+- **`plan_turn` tool** — opening-move router for any task. Runs BM25 + PageRank against the query, returns confidence level (high/medium/low/none), recommended symbols/files, insertion point suggestions for missing features, prior negative evidence detection, and a budget advisor when turn budget exceeds 60%.
+- **`get_session_context` tool** — returns session history: files read, searches run, edits made, tool call counts. Use to avoid re-reading the same files.
+- **`register_edit` tool** — post-edit cache invalidation. Clears BM25 token cache and search result cache for edited files; optionally reindexes.
+- **Session journal** (`session_journal.py`) — process-lifetime singleton tracking reads, searches, edits, and negative evidence. Bounded at 5000 entries per category with LRU eviction. Thread-safe.
+- **Turn budget** (`turn_budget.py`) — cross-call token accumulator. Injects `budget_warning` + `auto_compacted` into `_meta` when budget runs low. Configurable via `turn_budget_tokens` and `turn_gap_seconds`.
+- **Session state persistence** (`session_state.py`) — save/restore session across restarts. Writes only on clean shutdown via `atexit`. Staleness validated against `indexed_at` on restore. Opt-in via `session_resume: true`.
+- **Negative evidence in `search_symbols`** — when results are empty or below threshold, response includes structured `negative_evidence` with `verdict` (no_implementation_found / low_confidence_matches), `scanned_symbols`, `scanned_files`, `related_existing`.
+- **LRU result cache in `search_symbols`** — 128-entry default, cache key includes `indexed_at` for automatic invalidation on reindex.
+- **10 new config keys**: `negative_evidence_threshold`, `search_result_cache_max`, `session_journal`, `plan_turn_high_threshold`, `plan_turn_medium_threshold`, `turn_budget_tokens`, `turn_gap_seconds`, `session_resume`, `session_max_age_minutes`, `session_max_queries`.
+- **CLAUDE.md policy updates** — routing rules for `plan_turn`, negative evidence handling, budget warning response, and a Read exception note (harness requires Read before Edit/Write).
+- 75 new tests across 10 test files (2191 total, 0 regressions).
+
 ## [1.21.27] - 2026-04-04
 
 ### Added
