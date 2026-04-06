@@ -78,15 +78,65 @@ Add the `jcodemunch` entry:
 
 Restart Claude Desktop.
 
+#### OpenClaw
+
+**Option A — CLI (one command):**
+
+```bash
+openclaw mcp set jcodemunch '{"command":"uvx","args":["jcodemunch-mcp"]}'
+```
+
+**Option B — Edit config directly:**
+
+Add the entry to `~/.openclaw/openclaw.json` under `mcpServers`:
+
+```json
+{
+  "mcpServers": {
+    "jcodemunch": {
+      "command": "uvx",
+      "args": ["jcodemunch-mcp"],
+      "transport": "stdio"
+    }
+  }
+}
+```
+
+Restart the gateway:
+
+```bash
+openclaw gateway restart
+```
+
+Verify the server is registered:
+
+```bash
+openclaw mcp list
+```
+
+**Per-agent routing (optional):** if you run multiple OpenClaw agents, you can restrict which ones get jCodeMunch access:
+
+```json
+{
+  "agents": {
+    "coder": {
+      "mcpServers": ["jcodemunch", "filesystem", "github"]
+    }
+  }
+}
+```
+
 #### Other clients (Cursor, Windsurf, Roo, etc.)
 
 Any MCP-compatible client accepts the same JSON block above in its MCP config file.
 
-### Step 3 — Tell Claude to use it
+### Step 3 — Tell your agent to use it
 
 **This step is the most commonly missed.** Installing the server makes the tools
-*available* — but Claude defaults to its built-in file tools (Read, Grep, Glob) and
-will never touch jCodeMunch without explicit instructions.
+*available* — but agents default to their built-in file tools and will never touch
+jCodeMunch without explicit instructions.
+
+#### Claude Code / Claude Desktop
 
 Create or edit `~/.claude/CLAUDE.md` (global — applies to every project):
 
@@ -107,15 +157,60 @@ You can also add the same block to a project-level `CLAUDE.md` in your repo root
 > [!IMPORTANT]
 > **CLAUDE.md is a soft rule.** It works well under normal conditions, but agents can ignore it when moving fast, under load, or deep in a complex task — not because they forgot, but because native tools feel faster in the moment. If you need reliable enforcement, install the [hook scripts](AGENT_HOOKS.md) — they intercept `Grep`, `Glob`, and `Bash` at the tool-call level and redirect Claude before the shortcut fires.
 
+#### OpenClaw
+
+Create a system prompt file for your agent (e.g. `~/.openclaw/agents/coder.md`) and add the same policy:
+
+```markdown
+## Code Exploration Policy
+Always use jCodemunch-MCP tools — never fall back to built-in file tools for code exploration.
+- Before reading a file: use get_file_outline or get_file_content
+- Before searching: use search_symbols or search_text
+- Before exploring structure: use get_file_tree or get_repo_outline
+- Call resolve_repo with the current directory first; if not indexed, call index_folder.
+```
+
+Then point your agent config at that file in `~/.openclaw/openclaw.json`:
+
+```json
+{
+  "agents": {
+    "named": {
+      "coder": {
+        "systemPromptFile": "~/.openclaw/agents/coder.md"
+      }
+    }
+  }
+}
+```
+
+Without this prompt policy, your OpenClaw agent will have the tools available but never use them.
+
 ---
 
 ## First use
 
-1. Open a project in Claude Code (or Claude Desktop).
-2. Ask: *"Index this project"* — Claude will call `index_folder` on the current directory.
-3. Ask: *"Find the authenticate function"* — Claude calls `search_symbols`, then `get_symbol_source`. No file reads.
+1. Open a project in your agent (Claude Code, Claude Desktop, OpenClaw, etc.).
+2. Ask: *"Index this project"* — the agent will call `index_folder` on the current directory.
+3. Ask: *"Find the authenticate function"* — the agent calls `search_symbols`, then `get_symbol_source`. No file reads.
 
-**Verify it's working:** ask *"Is this project indexed?"* — Claude should call `resolve_repo` with the current directory. To see all indexed repos, ask *"What repos do you have indexed?"* — Claude will call `list_repos`.
+**Verify it's working:** ask *"Is this project indexed?"* — the agent should call `resolve_repo` with the current directory. To see all indexed repos, ask *"What repos do you have indexed?"* — the agent will call `list_repos`.
+
+## Check your token savings
+
+Ask your agent: *"How many tokens has jCodeMunch saved me?"*
+
+The agent will call `get_session_stats`, which returns:
+
+| Field | Meaning |
+|-------|---------|
+| `session_tokens_saved` | Tokens saved in the current session |
+| `total_tokens_saved` | Lifetime tokens saved (persists across sessions) |
+| `session_cost_avoided` | Estimated cost avoided this session, broken down by model |
+| `total_cost_avoided` | Lifetime cost avoided, broken down by model |
+| `tool_breakdown` | Per-tool token savings for the current session |
+
+Lifetime stats persist to `~/.code-index/session_stats.json`. If this file exists, jCodeMunch is working and saving you tokens. If the numbers are zero, the agent is likely still using built-in file tools — revisit Step 3 above.
 
 ---
 
@@ -140,13 +235,15 @@ You can also add the same block to a project-level `CLAUDE.md` in your repo root
 
 ## Troubleshooting
 
-**Claude isn't calling jCodeMunch tools**
-→ Check that `CLAUDE.md` exists and contains the Code Exploration Policy above.
-→ Run `/mcp` in Claude Code to confirm the server is connected.
+**Agent isn't calling jCodeMunch tools**
+→ Check that your prompt policy exists (CLAUDE.md for Claude, systemPromptFile for OpenClaw) and contains the Code Exploration Policy from Step 3.
+→ Claude Code: run `/mcp` to confirm the server is connected.
+→ OpenClaw: run `openclaw mcp list` to confirm `jcodemunch` appears.
 
-**Claude uses jCodeMunch in simple tasks but falls back to Read/Grep in complex ones**
+**Agent uses jCodeMunch in simple tasks but falls back to file reads in complex ones**
 → This is the "pressure bypass" — the agent sees the rule and skips it anyway because native tools feel faster.
-→ CLAUDE.md can't stop this. Install the enforcement hooks: [AGENT_HOOKS.md](AGENT_HOOKS.md).
+→ Claude Code: CLAUDE.md can't stop this. Install the enforcement hooks: [AGENT_HOOKS.md](AGENT_HOOKS.md).
+→ OpenClaw: reinforce the policy in your systemPromptFile with stronger language (e.g. "NEVER use built-in file read tools for code exploration — always use jCodeMunch").
 
 **`jcodemunch-mcp` not found**
 → Use `uvx jcodemunch-mcp` in your config instead of the bare command name — it bypasses PATH entirely.
