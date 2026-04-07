@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, IO, Optional
 
-from .hook_event import _default_manifest_path, read_manifest
+from .hook_event import default_manifest_path, read_manifest
 from .tools.index_folder import index_folder
 from .tools.invalidate_cache import invalidate_cache
 from .reindex_state import (
@@ -672,7 +672,7 @@ async def watch_claude_worktrees(
     follow_symlinks: bool = False,
 ) -> None:
     """Watch agent worktrees via JSONL manifest and/or git repo polling."""
-    manifest_path = _default_manifest_path()
+    manifest_path = default_manifest_path()
     use_manifest = manifest_path.is_file() or not repos
     use_repos = bool(repos)
 
