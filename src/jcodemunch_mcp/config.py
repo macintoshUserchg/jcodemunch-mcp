@@ -287,6 +287,7 @@ DEFAULTS = {
     "summarizer_model": "",
     "embed_model": "",
     "claude_poll_interval": 5.0,
+    "worktree_base_path": "",
     "log_level": "WARNING",
     "log_file": None,
     "redact_source_root": False,
@@ -348,6 +349,7 @@ CONFIG_TYPES = {
     "summarizer_model": str,
     "embed_model": str,
     "claude_poll_interval": float,
+    "worktree_base_path": str,
     "log_level": str,
     "log_file": (str, type(None)),
     "redact_source_root": bool,
@@ -1320,6 +1322,10 @@ def generate_template() -> str:
   //   Only applies when freshness_mode is "strict". Default: 500.
   // "claude_poll_interval": 5.0,
   //   Seconds between polling Claude Code worktrees for changes.
+  // "worktree_base_path": "",
+  //   Absolute path for git worktrees created by hook-event.
+  //   Default: <cwd>/.claude/worktrees/<name> (Claude Code convention).
+  //   Set to e.g. "~/.claude-worktrees" to store all worktrees centrally.
 
   // === Logging ===
   // "log_level": "WARNING",

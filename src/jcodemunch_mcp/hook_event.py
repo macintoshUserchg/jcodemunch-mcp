@@ -1,21 +1,83 @@
-"""Hook event handler — receives Claude Code worktree events and writes to a JSONL manifest."""
+"""Hook event handler — receives Claude Code worktree events, creates/removes
+git worktrees, and records state to a JSONL manifest."""
 
 import json
+import os
+import shutil
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 
-DEFAULT_MANIFEST_PATH = Path.home() / ".claude" / "jcodemunch-worktrees.jsonl"
+def default_manifest_path() -> Path:
+    """Return manifest path, respecting CODE_INDEX_PATH."""
+    storage = os.environ.get("CODE_INDEX_PATH", str(Path.home() / ".code-index"))
+    return Path(storage) / "jcodemunch-worktrees.jsonl"
 
 
-def handle_hook_event(event_type: str, manifest_path: Path = DEFAULT_MANIFEST_PATH) -> None:
-    """Read worktree JSON from stdin, append an event line to the JSONL manifest.
+# Legacy location — checked for migration.
+_LEGACY_MANIFEST_PATH = Path.home() / ".claude" / "jcodemunch-worktrees.jsonl"
 
-    Called by Claude Code's WorktreeCreate/WorktreeRemove hooks via:
+
+def _migrate_manifest(new_path: Path) -> None:
+    """Move legacy manifest from ~/.claude/ to the new location if it exists."""
+    if _LEGACY_MANIFEST_PATH.is_file() and not new_path.is_file():
+        new_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(_LEGACY_MANIFEST_PATH), str(new_path))
+
+
+def _get_worktree_base() -> str:
+    """Load worktree_base_path from config.jsonc (empty string = use default)."""
+    try:
+        from jcodemunch_mcp.config import load_config, get as config_get
+        load_config()
+        return config_get("worktree_base_path", "")
+    except Exception:
+        return ""
+
+
+def _resolve_worktree_path(cwd: str, name: str) -> str:
+    """Determine the worktree path from cwd + name, respecting config."""
+    base = _get_worktree_base()
+    if base:
+        return str(Path(base).expanduser().resolve() / name)
+    return str(Path(cwd) / ".claude" / "worktrees" / name)
+
+
+def _append_manifest(event_type: str, resolved: str, manifest_path: Path) -> None:
+    """Append a single event line to the JSONL manifest."""
+    entry = {
+        "event": event_type,
+        "path": resolved,
+        "ts": datetime.now(timezone.utc).isoformat(),
+    }
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(manifest_path, "a") as f:
+        f.write(json.dumps(entry) + "\n")
+        f.flush()
+
+
+def handle_hook_event(event_type: str, manifest_path: Path | None = None) -> None:
+    """Handle a WorktreeCreate or WorktreeRemove event from Claude Code.
+
+    For 'create': determines path, runs ``git worktree add``, records to
+    manifest, prints resolved path to stdout.
+
+    For 'remove': determines path, runs ``git worktree remove``, records
+    to manifest.
+
+    When ``worktreePath`` is provided directly (legacy), the caller already
+    owns the worktree — only manifest recording is performed, no git commands.
+
+    Called by Claude Code hooks via:
         jcodemunch-mcp hook-event create
         jcodemunch-mcp hook-event remove
     """
+    if manifest_path is None:
+        manifest_path = default_manifest_path()
+        _migrate_manifest(manifest_path)
+
     try:
         payload = json.load(sys.stdin)
     except json.JSONDecodeError as exc:
@@ -24,40 +86,75 @@ def handle_hook_event(event_type: str, manifest_path: Path = DEFAULT_MANIFEST_PA
     except Exception as exc:
         print(f"ERROR: failed to read stdin: {exc}", file=sys.stderr)
         sys.exit(1)
-    # Claude Code sends {cwd, name} — derive the worktree path.
-    # Also accept legacy worktreePath/worktree_path for backwards compat.
-    worktree_path = payload.get("worktreePath") or payload.get("worktree_path")
-    if not worktree_path:
-        cwd = payload.get("cwd", "")
-        name = payload.get("name", "")
-        if cwd and name:
-            worktree_path = str(Path(cwd) / ".claude" / "worktrees" / name)
-    if not worktree_path:
-        print("ERROR: no worktree path in stdin payload (need worktreePath, or cwd+name)", file=sys.stderr)
+
+    cwd = payload.get("cwd", "")
+    name = payload.get("name", "")
+
+    # Legacy support: accept worktreePath / worktree_path directly.
+    # When provided, the caller already owns the worktree — skip git commands.
+    legacy_path = payload.get("worktreePath") or payload.get("worktree_path")
+
+    if legacy_path:
+        resolved = str(Path(legacy_path).resolve())
+        _append_manifest(event_type, resolved, manifest_path)
+        print(resolved, flush=True)
+        return
+
+    # Modern path: Claude Code sends {cwd, name}.
+    if not cwd or not name:
+        print("ERROR: need cwd+name or worktreePath in stdin payload", file=sys.stderr)
         sys.exit(1)
 
+    worktree_path = _resolve_worktree_path(cwd, name)
     resolved = str(Path(worktree_path).resolve())
-    entry = {
-        "event": event_type,
-        "path": resolved,
-        "ts": datetime.now(timezone.utc).isoformat(),
-    }
 
-    manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(manifest_path, "a") as f:
-        f.write(json.dumps(entry) + "\n")
-        f.flush()
+    if event_type == "create":
+        Path(resolved).parent.mkdir(parents=True, exist_ok=True)
+        branch_name = f"worktree-{name}"
+        result = subprocess.run(
+            ["git", "-C", cwd, "worktree", "add", resolved, "-b", branch_name],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            print(f"ERROR: git worktree add failed: {result.stderr.strip()}", file=sys.stderr)
+            sys.exit(1)
+
+    elif event_type == "remove":
+        result = subprocess.run(
+            ["git", "-C", cwd, "worktree", "remove", resolved, "--force"],
+            capture_output=True,
+            text=True,
+        )
+        # Non-fatal: worktree may already be gone.
+        if result.returncode != 0:
+            print(f"WARNING: git worktree remove failed: {result.stderr.strip()}", file=sys.stderr)
+
+        # Clean up the branch created during worktree add.
+        branch_name = f"worktree-{name}"
+        subprocess.run(
+            ["git", "-C", cwd, "branch", "-D", branch_name],
+            capture_output=True,
+            text=True,
+        )
+        # Branch deletion is best-effort — no error if it doesn't exist.
+
+    _append_manifest(event_type, resolved, manifest_path)
 
     # Claude Code reads stdout to get the worktree path.
-    print(resolved)
-    print(f"jcodemunch-mcp: recorded {event_type} for {resolved}", file=sys.stderr)
+    # flush=True ensures output is not buffered (e.g. when run via uvx).
+    print(resolved, flush=True)
 
 
-def read_manifest(manifest_path: Path = DEFAULT_MANIFEST_PATH) -> set[str]:
+def read_manifest(manifest_path: Path | None = None) -> set[str]:
     """Read the JSONL manifest and return the set of currently active worktree paths.
 
     Replays all events in order: a 'create' adds a path, a 'remove' removes it.
     """
+    if manifest_path is None:
+        manifest_path = default_manifest_path()
+        _migrate_manifest(manifest_path)
+
     active: dict[str, bool] = {}
     if not manifest_path.is_file():
         return set()
