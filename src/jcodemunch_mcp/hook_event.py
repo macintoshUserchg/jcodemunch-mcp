@@ -111,14 +111,24 @@ def handle_hook_event(event_type: str, manifest_path: Path | None = None) -> Non
             sys.exit(1)
 
     elif event_type == "remove":
+        git_cwd = cwd or "."
         result = subprocess.run(
-            ["git", "-C", cwd or ".", "worktree", "remove", resolved],
+            ["git", "-C", git_cwd, "worktree", "remove", resolved, "--force"],
             capture_output=True,
             text=True,
         )
         # Non-fatal: worktree may already be gone.
         if result.returncode != 0:
             print(f"WARNING: git worktree remove failed: {result.stderr.strip()}", file=sys.stderr)
+
+        # Clean up the branch created during worktree add.
+        branch_name = f"worktree-{name}" if name else f"worktree-{Path(resolved).name}"
+        subprocess.run(
+            ["git", "-C", git_cwd, "branch", "-D", branch_name],
+            capture_output=True,
+            text=True,
+        )
+        # Branch deletion is best-effort — no error if it doesn't exist.
 
     _append_manifest(event_type, resolved, manifest_path)
 

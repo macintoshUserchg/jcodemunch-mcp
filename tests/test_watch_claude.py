@@ -139,8 +139,8 @@ class TestHookEvent:
         expected = str(Path(tmp_path / ".claude" / "worktrees" / "default-wt").resolve())
         assert entry["path"] == expected
 
-    def test_remove_runs_git_worktree_remove(self, tmp_path):
-        """hook-event remove should invoke git worktree remove."""
+    def test_remove_runs_git_worktree_remove_and_branch_delete(self, tmp_path):
+        """hook-event remove should invoke git worktree remove and git branch -D."""
         manifest = tmp_path / "manifest.jsonl"
         payload = json.dumps({
             "cwd": str(tmp_path),
@@ -157,11 +157,16 @@ class TestHookEvent:
         ):
             handle_hook_event("remove", manifest_path=manifest)
 
-        mock_run.assert_called_once()
-        args = mock_run.call_args[0][0]
-        assert args[0] == "git"
-        assert "worktree" in args
-        assert "remove" in args
+        assert mock_run.call_count == 2
+        # First call: git worktree remove
+        wt_args = mock_run.call_args_list[0][0][0]
+        assert "worktree" in wt_args
+        assert "remove" in wt_args
+        # Second call: git branch -D worktree-old-wt
+        br_args = mock_run.call_args_list[1][0][0]
+        assert "branch" in br_args
+        assert "-D" in br_args
+        assert "worktree-old-wt" in br_args
 
     def test_remove_nonfatal_on_git_failure(self, tmp_path):
         """git worktree remove failure should not crash."""
