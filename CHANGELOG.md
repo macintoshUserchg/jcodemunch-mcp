@@ -2,6 +2,11 @@
 
 All notable changes to jcodemunch-mcp are documented here.
 
+## [1.23.5] — 2026-04-08
+
+### Changed
+- CI: bump `actions/checkout` v4→v5 and `astral-sh/setup-uv` v3→v6 for Node.js 24 compatibility (GitHub enforces June 2nd 2026)
+
 ## [1.23.4] — 2026-04-08
 
 ### Fixed
