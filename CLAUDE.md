@@ -10,6 +10,7 @@
 ```
 src/jcodemunch_mcp/
   server.py            # MCP dispatcher (async); CLI subcommand dispatch, auth/rate-limit middleware
+  watcher.py           # WatcherManager class (dynamic folder watching); watch_folders() wrapper
   security.py          # Path validation, skip patterns, file caps
   config.py            # JSONC config: global + per-project layering, env var fallback, language/tool gating
   agent_selector.py    # Complexity scoring + model routing (off/manual/auto); default provider batting orders
@@ -22,7 +23,7 @@ src/jcodemunch_mcp/
     imports.py         # Regex import extraction (19 languages); extract_imports(), resolve_specifier(), build_psr4_map()
     fqn.py             # PHP FQN ↔ symbol_id translation (PSR-4); symbol_to_fqn(), fqn_to_symbol()
   storage/
-    sqlite_store.py    # CodeIndex, save/load/incremental_save, WAL-aware LRU cache (_db_mtime_ns)
+    sqlite_store.py    # CodeIndex, save/load/incremental_save, WAL-aware LRU cache (_db_mtime_ns); get_source_root()
   embeddings/
     local_encoder.py   # Bundled ONNX local encoder (all-MiniLM-L6-v2, 384-dim); WordPiece tokenizer, encode_batch(), download_model()
   enrichment/

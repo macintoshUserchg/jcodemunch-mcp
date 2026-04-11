@@ -934,6 +934,30 @@ class SQLiteIndexStore:
 
         return changed_files, new_files, deleted_files
 
+    def get_source_root(self, owner: str, name: str) -> Optional[str]:
+        """Fast metadata-only query for source_root.
+
+        Returns None if the repo is not indexed.
+        """
+        safe_owner = self._safe_repo_component(owner, "owner")
+        safe_name = self._safe_repo_component(name, "name")
+        db_path = self._db_path(safe_owner, safe_name)
+        if not db_path.exists():
+            return None
+        _pairs = parse_path_map()
+        try:
+            conn = self._connect(db_path)
+            try:
+                meta = self._read_meta(conn)
+            finally:
+                conn.close()
+            if not meta:
+                return None
+            return remap(meta.get("source_root", ""), _pairs)
+        except Exception:
+            logger.debug("Failed to get source_root for %s/%s", owner, name, exc_info=True)
+            return None
+
     def list_repos(self) -> list[dict]:
         """List all indexed repositories (scans .db files only)."""
         _pairs = parse_path_map()

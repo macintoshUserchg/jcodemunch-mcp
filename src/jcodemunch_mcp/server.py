@@ -30,10 +30,14 @@ from .storage import result_cache_invalidate as _result_cache_invalidate
 from .storage import write_pulse as _write_pulse
 
 try:
-    from .watcher import watch_folders, WatcherError
+    from .watcher import watch_folders, WatcherError, WatcherManager
 except ImportError:
     watch_folders = None  # type: ignore[assignment, misc]
+    WatcherManager = None  # type: ignore[assignment, misc]
     WatcherError = type("WatcherError", (Exception,), {})  # type: ignore[assignment, misc]
+
+# Global watcher manager instance (set in _run_server_with_watcher)
+_watcher_manager: Optional["WatcherManager"] = None
 
 
 # Canonical list of all registered tool names (unfiltered).
@@ -1930,6 +1934,86 @@ async def get_prompt(name: str, arguments: dict | None = None) -> GetPromptResul
     )
 
 
+# Tools excluded from auto-watch (no folder target, meta-only, or file-path arg)
+_AUTO_WATCH_EXCLUDED = frozenset({
+    "list_repos",
+    "get_session_stats",
+    "get_session_context",
+    "get_session_snapshot",
+    "index_file",  # path arg is a file path, not a folder; requires repo already indexed
+})
+
+
+def _get_source_root(repo: str, storage_path: Optional[str]) -> Optional[str]:
+    """Resolve repo ID to folder path using IndexStore public API.
+
+    Returns None if the repo is not indexed.
+    """
+    # Parse owner/name from repo ID (format: "owner/name" or "local/name-hash")
+    parts = repo.split("/", 1)
+    if len(parts) != 2:
+        return None
+    owner, name = parts
+
+    try:
+        from .storage import IndexStore
+        store = IndexStore(base_path=storage_path)
+        return store.get_source_root(owner, name)
+    except Exception:
+        logger.debug("Failed to resolve source_root for %s", repo, exc_info=True)
+        return None
+
+
+async def _auto_watch_if_needed(name: str, arguments: dict, storage_path: Optional[str]) -> None:
+    """Auto-watch hook: ensure unwatched repos are indexed before tool execution.
+
+    Hook fires BEFORE tool dispatch to ensure the tool runs against fresh data.
+    """
+    global _watcher_manager
+
+    # Check if watcher is running and auto-watch is enabled
+    if _watcher_manager is None:
+        return
+
+    if not config_module.get("watch", False):
+        return
+
+    # Check if tool is excluded
+    if name in _AUTO_WATCH_EXCLUDED:
+        return
+
+    # Extract folder from arguments
+    folder: Optional[str] = None
+
+    # Path-based tools
+    if "path" in arguments:
+        try:
+            folder = str(Path(arguments["path"]).expanduser().resolve())
+        except Exception:
+            pass
+
+    # Repo-based tools
+    if not folder and "repo" in arguments:
+        repo = arguments["repo"]
+        if repo:
+            folder = _get_source_root(repo, storage_path)
+
+    if not folder:
+        return
+
+    # Check if already watched
+    if _watcher_manager.is_watched(folder):
+        return
+
+    # Race-safe reindex, then start watching
+    try:
+        await _watcher_manager.ensure_indexed(folder)
+        await _watcher_manager.add_folder(folder)
+        logger.debug("Auto-watch: indexed and watching %s", folder)
+    except Exception:
+        logger.debug("Auto-watch failed for %s", folder, exc_info=True)
+
+
 @server.call_tool(validate_input=False)
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     """Handle tool calls."""
@@ -1967,6 +2051,12 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     f"in the .jcodemunch.jsonc file. Remove '{name}' from 'disabled_tools' to re-enable."
                 )
             }, indent=2))]
+
+        # Auto-watch: ensure unwatched repos are indexed before tool execution
+        try:
+            await _auto_watch_if_needed(name, arguments, storage_path)
+        except Exception:
+            logger.debug("Auto-watch check failed", exc_info=True)
 
         if name == "index_repo":
             from .tools.index_repo import index_repo
@@ -2741,7 +2831,9 @@ async def _run_server_with_watcher(
     watcher output and errors go to that file. If log_path is "auto", a temp
     file is created in the system temp directory.
     """
-    if watch_folders is None:
+    global _watcher_manager
+
+    if watch_folders is None or WatcherManager is None:
         raise ImportError(
             "watchfiles is required for --watcher. "
             "Install with: pip install 'jcodemunch-mcp[watch]'"
@@ -2758,20 +2850,49 @@ async def _run_server_with_watcher(
         )
 
     stop_event = asyncio.Event()
-    watcher_task = asyncio.create_task(
-        watch_folders(
-            **watcher_kwargs,
-            stop_event=stop_event,
-            quiet=True,
-            log_file=log_path,
-        ),
-        name="embedded-watcher",
+
+    _log_path = log_path
+
+    # Open log file handle if provided
+    _log_file_handle: Optional[IO] = None
+    if _log_path:
+        try:
+            _log_file_handle = open(_log_path, "a", encoding="utf-8")
+        except OSError as exc:
+            logger.warning("Could not open watcher log %r: %s — continuing without log", _log_path, exc)
+            _log_file_handle = None
+
+    # Create WatcherManager and add initial paths
+    manager = WatcherManager(
+        debounce_ms=watcher_kwargs.get("debounce_ms", 200),
+        use_ai_summaries=watcher_kwargs.get("use_ai_summaries", True),
+        storage_path=watcher_kwargs.get("storage_path"),
+        extra_ignore_patterns=watcher_kwargs.get("extra_ignore_patterns"),
+        follow_symlinks=watcher_kwargs.get("follow_symlinks", False),
+        quiet=True,
+        log_file_handle=_log_file_handle,
+    )
+    manager._stop_event = stop_event
+
+    # Add initial paths
+    initial_paths = watcher_kwargs.get("paths", [])
+    for path in initial_paths:
+        folder = Path(path).expanduser().resolve()
+        if folder.is_dir():
+            await manager.add_folder(str(folder))
+
+    _watcher_manager = manager
+
+    # Create manager run task
+    manager_task = asyncio.create_task(
+        manager.run(),
+        name="watcher-manager",
     )
 
     # Give watcher a moment to start; detect early failures before blocking on server
     await asyncio.sleep(0.1)
-    if watcher_task.done() and not watcher_task.cancelled():
-        exc = watcher_task.exception()
+    if manager_task.done() and not manager_task.cancelled():
+        exc = manager_task.exception()
         if exc is not None:
             logger.warning("Embedded watcher failed to start: %s", exc)
 
@@ -2780,19 +2901,31 @@ async def _run_server_with_watcher(
     except asyncio.CancelledError:
         pass  # Clean shutdown via Ctrl+C
     finally:
+        _watcher_manager = None
         stop_event.set()
-        from .storage import IndexStore
-        IndexStore(base_path=watcher_kwargs.get("storage_path") or os.environ.get("CODE_INDEX_PATH")).close()
+        # Remove all folders
+        for folder in list(manager._watched):
+            await manager.remove_folder(folder)
+        manager.stop()
+        manager_task.cancel()
         try:
-            await asyncio.wait_for(watcher_task, timeout=5.0)
+            await asyncio.wait_for(manager_task, timeout=5.0)
         except (asyncio.TimeoutError, asyncio.CancelledError):
-            watcher_task.cancel()
+            manager_task.cancel()
             try:
-                await watcher_task
+                await manager_task
             except asyncio.CancelledError:
                 pass
         except (WatcherError, Exception) as exc:
             logger.warning("Watcher stopped with error: %s", exc)
+        # Close log file handle
+        if _log_file_handle is not None:
+            try:
+                _log_file_handle.close()
+            except Exception:
+                pass
+        from .storage import IndexStore
+        IndexStore(base_path=watcher_kwargs.get("storage_path") or os.environ.get("CODE_INDEX_PATH")).close()
 
 
 async def run_stdio_server():
