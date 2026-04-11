@@ -124,6 +124,7 @@ async def test_call_tool_defaults_index_repo_incremental_true():
         storage_path=None,
         incremental=True,
         extra_ignore_patterns=None,
+        progress_cb=None,
     )
 
 
@@ -140,6 +141,7 @@ async def test_call_tool_defaults_index_folder_incremental_true():
         extra_ignore_patterns=None,
         follow_symlinks=False,
         incremental=True,
+        progress_cb=None,
     )
 
 

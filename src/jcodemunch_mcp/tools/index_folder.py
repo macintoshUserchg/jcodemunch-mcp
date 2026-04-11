@@ -9,7 +9,7 @@ import time
 from collections import defaultdict
 from functools import lru_cache
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 import re
 
 import pathspec
@@ -401,6 +401,7 @@ def index_folder(
     incremental: bool = True,
     context_providers: bool = True,
     changed_paths: Optional[list[WatcherChange]] = None,
+    progress_cb: "Optional[Callable[[int, int, str], None]]" = None,
 ) -> dict:
     """Index a local folder containing source code.
 
@@ -956,13 +957,18 @@ def index_folder(
             files_to_parse = set(changed) | set(new)
             raw_files_subset: dict[str, str] = {}
             subset_hashes: dict[str, str] = {}
-            for rel_path in files_to_parse:
+            _incr_total = len(files_to_parse)
+            for _incr_idx, rel_path in enumerate(sorted(files_to_parse)):
+                if progress_cb:
+                    progress_cb(_incr_idx, _incr_total, rel_path)
                 # Use content cached by _hash_file if available (avoids second read)
                 content = _hash_file_cache.pop(rel_path, None) or _read_file(rel_path)
                 if content is None:
                     continue
                 raw_files_subset[rel_path] = content
                 subset_hashes[rel_path] = computed_hashes.get(rel_path, _file_hash(content))
+            if progress_cb and _incr_total > 0:
+                progress_cb(_incr_total, _incr_total, "Parsing complete")
 
             # Shared pipeline: parse, enrich, summarize, extract metadata
             new_symbols, incr_file_summaries, incr_file_languages, incr_file_imports, incremental_no_symbols = (
@@ -1056,7 +1062,10 @@ def index_folder(
 
         no_symbols_files: list[str] = []
         _languages_with_symbols: set[str] = set()
-        for rel_path in source_file_list:
+        _total_files = len(source_file_list)
+        for _file_idx, rel_path in enumerate(source_file_list):
+            if progress_cb:
+                progress_cb(_file_idx, _total_files, rel_path)
             content = _read_file(rel_path)
             if content is None:
                 continue
@@ -1094,6 +1103,9 @@ def index_folder(
             if imps:
                 file_imports[rel_path] = imps
             # content is discarded at end of iteration
+
+        if progress_cb:
+            progress_cb(_total_files, _total_files, "Parsing complete")
 
         logger.info(
             "Parsing complete — with symbols: %d, no symbols: %d",

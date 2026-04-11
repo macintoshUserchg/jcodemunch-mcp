@@ -6,7 +6,7 @@ import logging
 import os
 import re
 import time
-from typing import Optional
+from typing import Callable, Optional
 from urllib.parse import urlparse
 
 import httpx
@@ -278,6 +278,7 @@ async def index_repo(
     storage_path: Optional[str] = None,
     incremental: bool = True,
     extra_ignore_patterns: Optional[list] = None,
+    progress_cb: "Optional[Callable[[int, int, str], None]]" = None,
 ) -> dict:
     """Index a GitHub repository.
     
@@ -384,14 +385,21 @@ async def index_repo(
 
         # Fetch file contents concurrently (only files that need updating)
         semaphore = asyncio.Semaphore(10)  # Limit concurrent requests
+        _fetch_total = len(files_to_fetch)
+        _fetch_done = 0
 
         async def fetch_with_limit(path: str) -> tuple[str, str]:
+            nonlocal _fetch_done
             async with semaphore:
                 try:
                     content = await fetch_file_content(owner, repo, path, github_token)
                     return path, content
                 except Exception:
                     return path, ""
+                finally:
+                    _fetch_done += 1
+                    if progress_cb:
+                        progress_cb(_fetch_done, _fetch_total, path)
 
         tasks = [fetch_with_limit(path) for path in files_to_fetch]
         file_contents = await asyncio.gather(*tasks)

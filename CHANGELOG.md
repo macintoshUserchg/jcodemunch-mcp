@@ -2,6 +2,14 @@
 
 All notable changes to jcodemunch-mcp are documented here.
 
+## [1.34.0] — 2026-04-11
+
+### Added
+- **MCP progress notifications** ([#232](https://github.com/jgravelle/jcodemunch-mcp/issues/232)): `index_folder`, `index_repo`, `index_file`, and `embed_repo` now emit `notifications/progress` when the client provides a `progressToken`. Zero token cost — notifications go to the host (e.g. VS Code MCP widget), never the model. Shows label, ASCII bar, percent, count, and current item name
+- **`ProgressReporter`** (`progress.py`): thread-safe, monotonic progress helper. No pulse threads, no fake drift — progress reflects real completed work
+- **`make_progress_notify()`** (`progress.py`): bridge function that creates a thread-safe callback from the MCP request context, using `asyncio.run_coroutine_threadsafe` to safely send notifications from worker threads
+- 16 new tests in `tests/test_progress.py` covering reporter lifecycle, monotonicity, thread safety, format, no-op behavior, and tool signature wiring
+
 ## [1.33.0] — 2026-04-11
 
 ### Added

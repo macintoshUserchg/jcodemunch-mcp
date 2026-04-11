@@ -1,9 +1,9 @@
 # jcodemunch-mcp — Project Brief
 
 ## Current State
-- **Version:** 1.33.0 (published to PyPI)
+- **Version:** 1.34.0 (published to PyPI)
 - **INDEX_VERSION:** 8
-- **Tests:** 2654 passed, 5 skipped
+- **Tests:** 2670 passed, 5 skipped
 - **Python:** >=3.10
 
 ## Key Files
@@ -11,6 +11,7 @@
 src/jcodemunch_mcp/
   server.py            # MCP dispatcher (async); CLI subcommand dispatch, auth/rate-limit middleware
   watcher.py           # WatcherManager class (dynamic folder watching); watch_folders() wrapper
+  progress.py          # MCP progress notifications; ProgressReporter (thread-safe, monotonic), make_progress_notify() bridge
   security.py          # Path validation, skip patterns, file caps
   config.py            # JSONC config: global + per-project layering, env var fallback, language/tool gating
   agent_selector.py    # Complexity scoring + model routing (off/manual/auto); default provider batting orders

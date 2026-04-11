@@ -2058,6 +2058,21 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         except Exception:
             logger.debug("Auto-watch check failed", exc_info=True)
 
+        # Progress notifications for long-running tools
+        _progress_cb = None
+        if name in ("index_repo", "index_folder", "index_file", "embed_repo"):
+            try:
+                from .progress import make_progress_notify, ProgressReporter
+                _progress_notify = make_progress_notify(server)
+                if _progress_notify:
+                    _label = {"index_repo": "Index", "index_folder": "Index",
+                              "index_file": "Index", "embed_repo": "Embed"}[name]
+                    _reporter = ProgressReporter(_progress_notify, _label)
+                    _progress_cb = _reporter.update
+                    _reporter_ref = _reporter  # prevent GC
+            except Exception:
+                logger.debug("Progress setup failed", exc_info=True)
+
         if name == "index_repo":
             from .tools.index_repo import index_repo
             result = await index_repo(
@@ -2066,6 +2081,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 storage_path=storage_path,
                 incremental=arguments.get("incremental", True),
                 extra_ignore_patterns=arguments.get("extra_ignore_patterns"),
+                progress_cb=_progress_cb,
             )
             _result_cache_invalidate()
         elif name == "index_folder":
@@ -2080,6 +2096,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     extra_ignore_patterns=arguments.get("extra_ignore_patterns"),
                     follow_symlinks=arguments.get("follow_symlinks", False),
                     incremental=arguments.get("incremental", True),
+                    progress_cb=_progress_cb,
                 )
             )
             _result_cache_invalidate()
@@ -2103,6 +2120,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     use_ai_summaries=_ai,
                     storage_path=storage_path,
                     context_providers=arguments.get("context_providers", True),
+                    progress_cb=_progress_cb,
                 )
             )
             _result_cache_invalidate()
@@ -2644,6 +2662,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     batch_size=arguments.get("batch_size", 50),
                     force=arguments.get("force", False),
                     storage_path=storage_path,
+                    progress_cb=_progress_cb,
                 )
             )
         elif name == "get_cross_repo_map":

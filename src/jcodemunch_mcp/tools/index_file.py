@@ -4,7 +4,7 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from .. import config as _config
 from ..parser import LANGUAGE_EXTENSIONS, get_language_for_path
@@ -22,6 +22,7 @@ def index_file(
     use_ai_summaries: bool = True,
     storage_path: Optional[str] = None,
     context_providers: bool = True,
+    progress_cb: "Optional[Callable[[int, int, str], None]]" = None,
 ) -> dict:
     """Index a single file within an existing index.
 
@@ -138,6 +139,8 @@ def index_file(
         active_providers = [p for p in active_providers if p.name != "dbt"]
 
     # Shared pipeline: parse, enrich, summarize, extract metadata
+    if progress_cb:
+        progress_cb(0, 1, rel_path)
     warnings: list[str] = []
     new_symbols, file_summaries, file_languages, file_imports, _no_symbols = (
         parse_and_prepare_incremental(
@@ -172,6 +175,8 @@ def index_file(
         file_hashes={rel_path: file_hash},
         file_mtimes={rel_path: file_mtime},
     )
+    if progress_cb:
+        progress_cb(1, 1, rel_path)
 
     result: dict = {
         "success": True,

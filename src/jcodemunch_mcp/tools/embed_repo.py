@@ -8,7 +8,7 @@ one deliberate pass so that the first semantic query returns immediately.
 import logging
 import os
 import time
-from typing import Optional
+from typing import Callable, Optional
 
 from .. import config as _config
 from ..storage import IndexStore
@@ -201,6 +201,7 @@ def embed_repo(
     batch_size: int = EMBED_BATCH_SIZE,
     force: bool = False,
     storage_path: Optional[str] = None,
+    progress_cb: "Optional[Callable[[int, int, str], None]]" = None,
 ) -> dict:
     """Precompute and store all symbol embeddings for a repository.
 
@@ -293,7 +294,8 @@ def embed_repo(
     dim: Optional[int] = stored_dim
     batch_size = max(1, min(batch_size, 200))
 
-    for i in range(0, len(symbols_to_embed), batch_size):
+    _embed_total = len(symbols_to_embed)
+    for i in range(0, _embed_total, batch_size):
         batch = symbols_to_embed[i : i + batch_size]
         texts = [_sym_text(s) for s in batch]
         try:
@@ -301,6 +303,8 @@ def embed_repo(
         except Exception as exc:
             logger.warning("embed_repo: batch %d failed: %s", i // batch_size, exc)
             error_count += len(batch)
+            if progress_cb:
+                progress_cb(min(i + len(batch), _embed_total), _embed_total, "")
             continue
 
         if dim is None and vecs:
@@ -310,6 +314,8 @@ def embed_repo(
 
         emb_store.set_many({batch[j]["id"]: vecs[j] for j in range(len(batch))})
         embedded_count += len(batch)
+        if progress_cb:
+            progress_cb(min(i + len(batch), _embed_total), _embed_total, batch[-1].get("name", ""))
 
     elapsed = (time.perf_counter() - start) * 1000
     result: dict = {
