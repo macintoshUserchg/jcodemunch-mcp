@@ -287,6 +287,13 @@ class IndexStore:
         for db_file in self.base_path.glob("*.db"):
             self._sqlite.checkpoint_db(db_file)
 
+    def cleanup_orphan_indexes(self) -> int:
+        """Delete indexes whose source_root no longer exists on disk.
+
+        Delegates to SQLiteIndexStore.cleanup_orphan_indexes().
+        """
+        return self._sqlite.cleanup_orphan_indexes()
+
     def _safe_repo_component(self, value: str, field_name: str) -> str:
         """Validate and sanitize owner/name components used in on-disk cache paths.
 

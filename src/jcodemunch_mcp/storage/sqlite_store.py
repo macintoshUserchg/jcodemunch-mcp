@@ -1049,6 +1049,37 @@ class SQLiteIndexStore:
 
         return deleted
 
+    def cleanup_orphan_indexes(self) -> int:
+        """Delete indexes whose source_root no longer exists on disk.
+
+        Remote repos (GitHub, empty source_root) are skipped.
+        Returns the number of orphan indexes deleted.
+        """
+        deleted = 0
+        for entry in self.list_repos():
+            source_root = entry.get("source_root", "")
+            if not source_root:
+                continue  # Remote repo — no filesystem path to validate
+            try:
+                if not Path(source_root).is_dir():
+                    repo_id = entry["repo"]
+                    # repo_id is "local/name-hash" or "github/owner/repo"
+                    parts = repo_id.split("/", 1)
+                    if len(parts) == 2:
+                        owner, name = parts
+                    else:
+                        continue  # Malformed — skip
+                    if self.delete_index(owner, name):
+                        deleted += 1
+                        logger.info(
+                            "Deleted orphan index: %s (source_root: %s)",
+                            repo_id,
+                            source_root,
+                        )
+            except Exception:
+                logger.debug("Orphan check failed for %s", source_root, exc_info=True)
+        return deleted
+
     def get_symbol_content(
         self, owner: str, name: str, symbol_id: str,
         _index: Optional["CodeIndex"] = None,

@@ -2980,18 +2980,11 @@ async def _run_server_with_watcher(
 
     _watcher_manager = manager
 
-    # Create manager run task
+    # Create manager run task (self-restarts on crash)
     manager_task = asyncio.create_task(
         manager.run(),
         name="watcher-manager",
     )
-
-    # Give watcher a moment to start; detect early failures before blocking on server
-    await asyncio.sleep(0.1)
-    if manager_task.done() and not manager_task.cancelled():
-        exc = manager_task.exception()
-        if exc is not None:
-            logger.warning("Embedded watcher failed to start: %s", exc)
 
     try:
         await server_coro_func(*server_args)
@@ -4464,6 +4457,20 @@ def main(argv: Optional[list[str]] = None):
         # Re-run load_config() after _setup_logging() so config warnings/errors
         # go to the configured log destination (the early call at startup ran before logging was set up)
         config_module.load_config()
+
+        # Clean up orphan indexes whose source_root no longer exists
+        try:
+            from .storage import IndexStore
+
+            storage_path = os.environ.get("CODE_INDEX_PATH")
+            store = IndexStore(base_path=storage_path)
+            cleaned = store.cleanup_orphan_indexes()
+            store.close()
+            if cleaned:
+                logger.info("Cleaned up %d orphan index(es)", cleaned)
+        except Exception:
+            logger.debug("Orphan index cleanup failed", exc_info=True)
+
         config_module.load_all_project_configs()
         from .reindex_state import set_freshness_mode
         # Apply config default if --freshness-mode was not explicitly provided

@@ -619,38 +619,66 @@ class WatcherManager:
             return {"status": "error", "folder": folder, "error": str(exc)}
 
     async def run(self) -> None:
-        """Main loop: wait on stop_event, monitor for crashed tasks."""
+        """Main loop: monitor for crashed tasks and restart them. Self-restarts on crash."""
         if self._stop_event is None:
             self._stop_event = asyncio.Event()
 
-        while not self._stop_event.is_set():
-            # Check for crashed tasks and restart them
-            for folder in list(self._active):
-                task = self._active.get(folder)
-                if task and task.done() and not task.cancelled():
-                    exc = task.exception()
-                    if exc:
-                        _watcher_output(
-                            f"WatcherManager: task crashed for {folder}: {exc}, restarting...",
-                            quiet=self._quiet,
-                            log_file_handle=self._log_file_handle,
-                        )
-                        # Restart
-                        new_task = asyncio.create_task(
-                            _watch_single(
-                                folder_path=folder,
-                                debounce_ms=self._debounce_ms,
-                                use_ai_summaries=self._use_ai_summaries,
-                                storage_path=self._storage_path,
-                                extra_ignore_patterns=self._extra_ignore_patterns,
-                                follow_symlinks=self._follow_symlinks,
-                                quiet=self._quiet,
-                                log_file_handle=self._log_file_handle,
-                            ),
-                            name=f"watch:{folder}",
-                        )
-                        self._active[folder] = new_task
-            await asyncio.sleep(5.0)
+        _restart_count = 0
+        _MAX_RESTARTS = 5
+
+        while True:
+            try:
+                while not self._stop_event.is_set():
+                    # Check for crashed tasks and restart them
+                    for folder in list(self._active):
+                        task = self._active.get(folder)
+                        if task and task.done() and not task.cancelled():
+                            exc = task.exception()
+                            if exc:
+                                _watcher_output(
+                                    f"WatcherManager: task crashed for {folder}: {exc}, restarting...",
+                                    quiet=self._quiet,
+                                    log_file_handle=self._log_file_handle,
+                                )
+                                # Restart
+                                new_task = asyncio.create_task(
+                                    _watch_single(
+                                        folder_path=folder,
+                                        debounce_ms=self._debounce_ms,
+                                        use_ai_summaries=self._use_ai_summaries,
+                                        storage_path=self._storage_path,
+                                        extra_ignore_patterns=self._extra_ignore_patterns,
+                                        follow_symlinks=self._follow_symlinks,
+                                        quiet=self._quiet,
+                                        log_file_handle=self._log_file_handle,
+                                    ),
+                                    name=f"watch:{folder}",
+                                )
+                                self._active[folder] = new_task
+                    await asyncio.sleep(5.0)
+                # Inner loop exited normally — reset restart counter
+                _restart_count = 0
+            except asyncio.CancelledError:
+                raise  # Propagate cancellation — signals shutdown
+            except Exception as exc:
+                _restart_count += 1
+                _watcher_output(
+                    f"WatcherManager run() crashed ({_restart_count}/{_MAX_RESTARTS}): {exc}",
+                    quiet=self._quiet,
+                    log_file_handle=self._log_file_handle,
+                )
+                if _restart_count >= _MAX_RESTARTS:
+                    _watcher_output(
+                        "WatcherManager run() abandoned after 5 consecutive crashes",
+                        quiet=self._quiet,
+                        log_file_handle=self._log_file_handle,
+                    )
+                    break
+                await asyncio.sleep(0.1)  # Prevent spin-loop on persistent crash
+
+            # Inner loop exited — check if this is a graceful shutdown
+            if self._stop_event is not None and self._stop_event.is_set():
+                break  # Stop was requested — exit run() entirely
 
     def stop(self) -> None:
         """Signal the manager loop to stop."""
