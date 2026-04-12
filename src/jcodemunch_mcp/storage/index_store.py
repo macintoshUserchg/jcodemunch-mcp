@@ -777,7 +777,7 @@ class IndexStore:
         repos.sort(key=lambda repo: repo["repo"])
         return repos
 
-    def delete_index(self, owner: str, name: str) -> bool:
+    def delete_index(self, owner: str, name: str, force: bool = False) -> bool:
         """Delete an index (SQLite DB + sidecars + content dir).
 
         Legacy .json index files are only deleted when a SQLite .db already
@@ -785,6 +785,13 @@ class IndexStore:
         *only* copy of the data, deleting it would silently discard user data
         with no backup.  In that case we preserve the JSON — it will be
         replaced automatically on the next index_folder / save_index call.
+
+        Args:
+            owner: Repository owner.
+            name: Repository name.
+            force: When True, delete the JSON even if it is the sole copy.
+                Use this from invalidate_cache (explicit user action) to ensure
+                the index is fully cleared including any legacy JSON files.
         """
         db_existed = self._sqlite.has_index(owner, name)
         deleted = self._sqlite.delete_index(owner, name)
@@ -794,8 +801,9 @@ class IndexStore:
         lock_path = self._lock_path(owner, name)
 
         if index_path.exists():
-            if db_existed:
-                # Data was already in SQLite; JSON is a redundant legacy file.
+            if db_existed or force:
+                # Data was already in SQLite (or caller explicitly requests full
+                # wipe); JSON is redundant or force-deleted.
                 index_path.unlink()
                 deleted = True
             else:

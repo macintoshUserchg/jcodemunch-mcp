@@ -7,9 +7,11 @@ WAL mode enables concurrent readers + single writer with delta writes.
 import json
 import logging
 import os
+import platform
 import shutil
 import sqlite3
 import threading
+import time
 from collections import OrderedDict
 from datetime import datetime
 from pathlib import Path
@@ -264,6 +266,25 @@ def _migrate_v7_to_v8(conn: sqlite3.Connection) -> None:
         "will use text heuristics. Run 'jcodemunch-mcp index-folder' to fully "
         "re-index and enable AST-based call graphs."
     )
+
+
+def _unlink_retry(path: Path, retries: int = 3, delay: float = 0.1) -> bool:
+    """Delete a file with retry logic for Windows file-locking (PermissionError).
+
+    On Windows, WAL-mode SQLite files can remain briefly locked by another
+    thread even after all connections are closed.  Retrying with a short
+    sleep resolves this in practice without masking real permission errors
+    (which would persist across all retries and re-raise on the final attempt).
+    """
+    for attempt in range(retries):
+        try:
+            path.unlink()
+            return True
+        except PermissionError:
+            if platform.system() != "Windows" or attempt == retries - 1:
+                raise
+            time.sleep(delay)
+    return False  # unreachable, but satisfies type checkers
 
 
 class SQLiteIndexStore:
@@ -1007,18 +1028,18 @@ class SQLiteIndexStore:
         deleted = False
 
         if db_path.exists():
-            db_path.unlink()
+            _unlink_retry(db_path)
             deleted = True
             SQLiteIndexStore._initialized_dbs.discard(str(db_path))
 
         wal_path = Path(str(db_path) + "-wal")
         if wal_path.exists():
-            wal_path.unlink()
+            _unlink_retry(wal_path)
             deleted = True
 
         shm_path = Path(str(db_path) + "-shm")
         if shm_path.exists():
-            shm_path.unlink()
+            _unlink_retry(shm_path)
             deleted = True
 
         content_dir = self._content_dir(owner, name)

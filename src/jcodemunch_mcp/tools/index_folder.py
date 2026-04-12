@@ -935,6 +935,22 @@ def index_folder(
             _hash_file_cache[rel_path] = content
             return _file_hash(content)
 
+        # Force full reindex if invalidate_cache was called for this repo.
+        # Handles cases where the DB deletion failed (e.g. Windows WAL
+        # file-locking) and load_index still returns the old index.
+        _repo_full = f"{owner}/{repo_name}"
+        try:
+            from .invalidate_cache import _force_full_reindex
+            if _repo_full in _force_full_reindex:
+                _force_full_reindex.discard(_repo_full)
+                incremental = False
+                logger.info(
+                    "index_folder: forcing full reindex for %s (post-invalidation)",
+                    _repo_full,
+                )
+        except ImportError:
+            pass
+
         # Incremental path: detect changes using mtime fast-path
         if incremental and existing_index is not None:
             changed, new, deleted, computed_hashes, updated_mtimes = (

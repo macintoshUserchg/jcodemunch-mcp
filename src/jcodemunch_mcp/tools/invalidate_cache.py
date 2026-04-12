@@ -7,6 +7,13 @@ from .. import config as _cfg
 from ..parser.imports import _alias_map_cache, _ALIAS_MAP_LOCK, _sql_stem_cache, _SQL_STEM_LOCK
 from ._utils import resolve_repo, _bare_name_cache, _BARE_NAME_LOCK
 
+# Repos invalidated since the last index_folder call.  index_folder checks
+# this set and forces incremental=False for repos that were explicitly
+# invalidated, regardless of what the on-disk index says.  This handles
+# Windows WAL file-locking races where the .db delete fails silently and the
+# next incremental index_folder would incorrectly return "No changes detected".
+_force_full_reindex: set[str] = set()
+
 
 def invalidate_cache(
     repo: str,
@@ -38,7 +45,12 @@ def invalidate_cache(
             source_root = entry.get("source_root") or None
             break
 
-    deleted = store.delete_index(owner, name)
+    deleted = store.delete_index(owner, name, force=True)
+
+    # Signal that the next index_folder call for this repo must do a full
+    # reindex, even if the on-disk DB still exists (Windows WAL locking can
+    # prevent immediate deletion).
+    _force_full_reindex.add(f"{owner}/{name}")
 
     # Clear all in-process caches (X1 / C4-B / T4.5)
     with _cfg._CONFIG_LOCK:
