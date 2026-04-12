@@ -56,7 +56,13 @@ _PROJECT_CONFIGS: list[tuple[str, str]] = [
 
 
 def _discover_files(project_path: Optional[str] = None) -> list[dict[str, Any]]:
-    """Find all agent config files and return metadata."""
+    """Find all agent config files and return metadata.
+
+    In addition to the fixed config paths, this discovers rule files in
+    directories that Claude Code loads automatically:
+      - .claude/rules/*.md  (project-level rules)
+      - ~/.claude/rules/*.md (global rules, applied to all projects)
+    """
     home = Path.home()
     project = Path(project_path) if project_path else None
     found: list[dict[str, Any]] = []
@@ -77,6 +83,23 @@ def _discover_files(project_path: Optional[str] = None) -> list[dict[str, Any]]:
             except OSError:
                 pass
 
+    # Global rules directory (~/.claude/rules/*.md)
+    global_rules_dir = home / ".claude" / "rules"
+    if global_rules_dir.is_dir():
+        for rule_file in sorted(global_rules_dir.glob("*.md")):
+            try:
+                text = rule_file.read_text(encoding="utf-8", errors="replace")
+                found.append({
+                    "path": str(rule_file),
+                    "description": f"global rule: {rule_file.stem}",
+                    "scope": "global",
+                    "content": text,
+                    "tokens": _estimate_tokens(text),
+                    "lines": text.count("\n") + 1,
+                })
+            except OSError:
+                pass
+
     if project:
         for rel, desc in _PROJECT_CONFIGS:
             p = project / rel
@@ -86,6 +109,23 @@ def _discover_files(project_path: Optional[str] = None) -> list[dict[str, Any]]:
                     found.append({
                         "path": str(p),
                         "description": desc,
+                        "scope": "project",
+                        "content": text,
+                        "tokens": _estimate_tokens(text),
+                        "lines": text.count("\n") + 1,
+                    })
+                except OSError:
+                    pass
+
+        # Project rules directory (.claude/rules/*.md)
+        project_rules_dir = project / ".claude" / "rules"
+        if project_rules_dir.is_dir():
+            for rule_file in sorted(project_rules_dir.glob("*.md")):
+                try:
+                    text = rule_file.read_text(encoding="utf-8", errors="replace")
+                    found.append({
+                        "path": str(rule_file),
+                        "description": f"project rule: {rule_file.stem}",
                         "scope": "project",
                         "content": text,
                         "tokens": _estimate_tokens(text),

@@ -308,6 +308,23 @@ def test_discover_files_empty(tmp_path):
     assert len(project_files) == 0
 
 
+def test_discover_files_project_rules_dir(tmp_path):
+    """Rules in .claude/rules/*.md should be discovered as project-scoped."""
+    rules_dir = tmp_path / ".claude" / "rules"
+    rules_dir.mkdir(parents=True)
+    (rules_dir / "guardrails.md").write_text("# Guardrails\nNo destructive actions.", encoding="utf-8")
+    (rules_dir / "search-opsec.md").write_text("# Search OPSEC\nDon't leak strategy.", encoding="utf-8")
+    # Non-.md files should be ignored
+    (rules_dir / "notes.txt").write_text("not a rule", encoding="utf-8")
+
+    files = _discover_files(str(tmp_path))
+    project_rules = [f for f in files if f["scope"] == "project" and "rule:" in f["description"]]
+    assert len(project_rules) == 2
+    descriptions = {f["description"] for f in project_rules}
+    assert "project rule: guardrails" in descriptions
+    assert "project rule: search-opsec" in descriptions
+
+
 # ---------------------------------------------------------------------------
 # Full audit
 # ---------------------------------------------------------------------------
