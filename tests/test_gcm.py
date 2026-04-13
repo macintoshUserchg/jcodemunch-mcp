@@ -51,9 +51,13 @@ class TestRetriever:
     def test_is_github_repo(self):
         from jcodemunch_mcp.groq.retriever import _is_github_repo
         assert _is_github_repo("pallets/flask") is True
+        assert _is_github_repo("facebook/react") is True
         assert _is_github_repo("flask") is False
-        # Local path should not match
         assert _is_github_repo(".") is False
+        assert _is_github_repo("./src/foo") is False
+        assert _is_github_repo("a/b/c") is False  # too many slashes
+        assert _is_github_repo("/absolute/path") is False
+        assert _is_github_repo("C:\\Users\\foo") is False
 
     def test_find_indexed_repo_match(self):
         from jcodemunch_mcp.groq.retriever import _find_indexed_repo

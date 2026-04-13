@@ -2,6 +2,11 @@
 
 All notable changes to jcodemunch-mcp are documented here.
 
+## [1.39.1] — 2026-04-13
+
+### Fixed
+- **gcm: fix GitHub repo detection on Linux** — `_is_github_repo` now correctly identifies `owner/name` patterns on all platforms (was failing on Linux where `/` is `os.path.sep`)
+
 ## [1.39.0] — 2026-04-13
 
 ### Added

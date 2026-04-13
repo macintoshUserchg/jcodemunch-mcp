@@ -12,8 +12,20 @@ from ..tools.index_folder import index_folder
 
 
 def _is_github_repo(repo: str) -> bool:
-    """True if repo looks like owner/name (not a local path)."""
-    return "/" in repo and not os.path.sep in repo and not os.path.exists(repo)
+    """True if repo looks like owner/name (not a local path).
+
+    GitHub repos have exactly one slash, no backslashes, no dots or colons
+    at the start (ruling out relative/absolute paths), and don't exist on disk.
+    """
+    if repo.count("/") != 1:
+        return False
+    owner, name = repo.split("/", 1)
+    if not owner or not name:
+        return False
+    # Rule out obvious local paths
+    if repo.startswith((".", "/", "\\")) or "\\" in repo or ":" in repo:
+        return False
+    return not os.path.exists(repo)
 
 
 def _find_indexed_repo(repo: str, storage_path: Optional[str] = None) -> Optional[str]:
