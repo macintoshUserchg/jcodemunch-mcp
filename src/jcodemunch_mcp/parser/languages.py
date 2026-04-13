@@ -150,6 +150,48 @@ LANGUAGE_EXTENSIONS = {
     # GraphQL
     ".graphql": "graphql",
     ".gql": "graphql",
+    # Pascal / Delphi / Object Pascal
+    ".pas": "pascal",
+    ".dpr": "pascal",
+    ".dpk": "pascal",
+    ".lpr": "pascal",
+    ".pp": "pascal",
+    # MATLAB / Octave (NOTE: .m conflicts with Objective-C; disambiguation in get_language_for_path)
+    ".mat": "matlab",
+    ".mlx": "matlab",
+    # Ada
+    ".adb": "ada",
+    ".ads": "ada",
+    # COBOL
+    ".cob": "cobol",
+    ".cbl": "cobol",
+    ".cpy": "cobol",
+    # Common Lisp
+    ".lisp": "commonlisp",
+    ".cl": "commonlisp",
+    ".lsp": "commonlisp",
+    ".asd": "commonlisp",
+    # Solidity
+    ".sol": "solidity",
+    # Zig
+    ".zig": "zig",
+    ".zon": "zig",
+    # PowerShell
+    ".ps1": "powershell",
+    ".psm1": "powershell",
+    ".psd1": "powershell",
+    # Apex (Salesforce)
+    ".cls": "apex",
+    ".trigger": "apex",
+    # OCaml
+    ".ml": "ocaml",
+    ".mli": "ocaml",
+    # PL/SQL (extend existing SQL)
+    ".pls": "sql",
+    ".plb": "sql",
+    ".pck": "sql",
+    ".pkb": "sql",
+    ".pks": "sql",
     # Assembly (multi-dialect: WLA-DX, NASM, GAS, CA65, MASM, etc.)
     ".asm": "asm",
     ".s": "asm",
@@ -1536,6 +1578,180 @@ OPENAPI_SPEC = LanguageSpec(
 )
 
 
+# Pascal / Delphi specification
+# tree-sitter node structure: defProc > declProc > identifier, declType > identifier
+# Custom parser in extractor.py via _parse_pascal_symbols().
+PASCAL_SPEC = LanguageSpec(
+    ts_language="pascal",
+    symbol_node_types={},
+    name_fields={},
+    param_fields={},
+    return_type_fields={},
+    docstring_strategy="preceding_comment",
+    decorator_node_type=None,
+    container_node_types=[],
+    constant_patterns=[],
+    type_patterns=[],
+)
+
+
+# MATLAB / Octave specification
+# tree-sitter node structure: function_definition > identifier, class_definition > identifier
+# Custom parser in extractor.py via _parse_matlab_symbols().
+MATLAB_SPEC = LanguageSpec(
+    ts_language="matlab",
+    symbol_node_types={},
+    name_fields={},
+    param_fields={},
+    return_type_fields={},
+    docstring_strategy="preceding_comment",
+    decorator_node_type=None,
+    container_node_types=[],
+    constant_patterns=[],
+    type_patterns=[],
+)
+
+
+# Ada specification
+# tree-sitter node structure: subprogram_body > function_specification/procedure_specification > identifier
+# Custom parser in extractor.py via _parse_ada_symbols().
+ADA_SPEC = LanguageSpec(
+    ts_language="ada",
+    symbol_node_types={},
+    name_fields={},
+    param_fields={},
+    return_type_fields={},
+    docstring_strategy="preceding_comment",
+    decorator_node_type=None,
+    container_node_types=[],
+    constant_patterns=[],
+    type_patterns=[],
+)
+
+
+# COBOL specification
+# tree-sitter node structure: procedure_division > paragraph_header, section_header
+# Custom parser in extractor.py via _parse_cobol_symbols().
+COBOL_SPEC = LanguageSpec(
+    ts_language="cobol",
+    symbol_node_types={},
+    name_fields={},
+    param_fields={},
+    return_type_fields={},
+    docstring_strategy="preceding_comment",
+    decorator_node_type=None,
+    container_node_types=[],
+    constant_patterns=[],
+    type_patterns=[],
+)
+
+
+# Common Lisp specification
+# tree-sitter node structure: defun > defun_header > sym_lit, list_lit for defclass/defstruct
+# Custom parser in extractor.py via _parse_commonlisp_symbols().
+COMMONLISP_SPEC = LanguageSpec(
+    ts_language="commonlisp",
+    symbol_node_types={},
+    name_fields={},
+    param_fields={},
+    return_type_fields={},
+    docstring_strategy="preceding_comment",
+    decorator_node_type=None,
+    container_node_types=[],
+    constant_patterns=[],
+    type_patterns=[],
+)
+
+
+# Solidity specification
+# tree-sitter node structure: contract/interface/library_declaration > identifier,
+# function_definition/event_definition/modifier_definition > identifier
+# Custom parser in extractor.py via _parse_solidity_symbols().
+SOLIDITY_SPEC = LanguageSpec(
+    ts_language="solidity",
+    symbol_node_types={},
+    name_fields={},
+    param_fields={},
+    return_type_fields={},
+    docstring_strategy="preceding_comment",
+    decorator_node_type=None,
+    container_node_types=[],
+    constant_patterns=[],
+    type_patterns=[],
+)
+
+
+# Zig specification
+# tree-sitter node structure: Decl > FnProto > IDENTIFIER, Decl > VarDecl > IDENTIFIER
+# Custom parser in extractor.py via _parse_zig_symbols().
+ZIG_SPEC = LanguageSpec(
+    ts_language="zig",
+    symbol_node_types={},
+    name_fields={},
+    param_fields={},
+    return_type_fields={},
+    docstring_strategy="preceding_comment",
+    decorator_node_type=None,
+    container_node_types=[],
+    constant_patterns=[],
+    type_patterns=[],
+)
+
+
+# PowerShell specification
+# tree-sitter node structure: function_statement > function_name,
+# class_statement > simple_name, enum_statement > simple_name
+# Custom parser in extractor.py via _parse_powershell_symbols().
+POWERSHELL_SPEC = LanguageSpec(
+    ts_language="powershell",
+    symbol_node_types={},
+    name_fields={},
+    param_fields={},
+    return_type_fields={},
+    docstring_strategy="preceding_comment",
+    decorator_node_type=None,
+    container_node_types=[],
+    constant_patterns=[],
+    type_patterns=[],
+)
+
+
+# Apex (Salesforce) specification
+# tree-sitter node structure: class_declaration > identifier, method_declaration > identifier,
+# trigger_declaration > identifier, interface_declaration > identifier
+# Custom parser in extractor.py via _parse_apex_symbols().
+APEX_SPEC = LanguageSpec(
+    ts_language="apex",
+    symbol_node_types={},
+    name_fields={},
+    param_fields={},
+    return_type_fields={},
+    docstring_strategy="preceding_comment",
+    decorator_node_type=None,
+    container_node_types=[],
+    constant_patterns=[],
+    type_patterns=[],
+)
+
+
+# OCaml specification
+# tree-sitter node structure: value_definition > let_binding > value_name,
+# type_definition > type_binding > type_constructor, module_definition > module_binding > module_name
+# Custom parser in extractor.py via _parse_ocaml_symbols().
+OCAML_SPEC = LanguageSpec(
+    ts_language="ocaml",
+    symbol_node_types={},
+    name_fields={},
+    param_fields={},
+    return_type_fields={},
+    docstring_strategy="preceding_comment",
+    decorator_node_type=None,
+    container_node_types=[],
+    constant_patterns=[],
+    type_patterns=[],
+)
+
+
 # Language registry
 LANGUAGE_REGISTRY = {
     "python": PYTHON_SPEC,
@@ -1595,6 +1811,16 @@ LANGUAGE_REGISTRY = {
     "ansible": ANSIBLE_SPEC,
     "json": JSON_SPEC,
     "openapi": OPENAPI_SPEC,
+    "pascal": PASCAL_SPEC,
+    "matlab": MATLAB_SPEC,
+    "ada": ADA_SPEC,
+    "cobol": COBOL_SPEC,
+    "commonlisp": COMMONLISP_SPEC,
+    "solidity": SOLIDITY_SPEC,
+    "zig": ZIG_SPEC,
+    "powershell": POWERSHELL_SPEC,
+    "apex": APEX_SPEC,
+    "ocaml": OCAML_SPEC,
 }
 
 logger = logging.getLogger(__name__)
@@ -1676,6 +1902,31 @@ def get_language_extensions() -> dict[str, str]:
     return LANGUAGE_EXTENSIONS
 
 
+def _looks_like_matlab_path(path: str) -> bool:
+    """Best-effort path heuristics for MATLAB .m files vs Objective-C .m files.
+
+    Returns True if the path likely belongs to a MATLAB project rather than
+    an Objective-C / iOS / macOS project.
+    """
+    lower = path.lower().replace("\\", "/")
+    parts = [p for p in lower.split("/") if p]
+    # Objective-C indicators: Xcode project dirs, iOS/macOS frameworks
+    _OBJC_MARKERS = frozenset({
+        "ios", "macos", "xcode", "cocoa", "objc", "objective-c",
+        "appdelegate", "viewcontroller", "uikit", "foundation",
+    })
+    # MATLAB indicators: typical MATLAB project dirs
+    _MATLAB_MARKERS = frozenset({
+        "matlab", "+", "toolbox", "simulink", "mex",
+    })
+    for part in parts:
+        if part in _OBJC_MARKERS:
+            return False
+        if part in _MATLAB_MARKERS:
+            return True
+    return False
+
+
 def get_language_for_path(path: str) -> "Optional[str]":
     """Return the language name for a file path, handling compound extensions.
 
@@ -1683,7 +1934,8 @@ def get_language_for_path(path: str) -> "Optional[str]":
     1. Well-known OpenAPI/Swagger basenames (openapi.yaml, swagger.json, …).
     2. Ansible path heuristics for YAML inventory/playbook files.
     3. Compound suffixes (e.g. ``.blade.php``, ``.openapi.yaml``).
-    4. Last extension (e.g. ``.php``).
+    4. MATLAB vs Objective-C disambiguation for ``.m`` files.
+    5. Last extension (e.g. ``.php``).
     """
     _apply_extra_extensions()
     import os as _os
@@ -1695,12 +1947,15 @@ def get_language_for_path(path: str) -> "Optional[str]":
     # 2. Path heuristics for Ansible YAML files
     if _looks_like_ansible_path(lower):
         return "ansible"
-    # 3. Compound extension (e.g. ".blade.php", ".openapi.yaml")
+    # 3. .m disambiguation: MATLAB vs Objective-C (default is objc in ext map)
+    if base.endswith(".m") and _looks_like_matlab_path(path):
+        return "matlab"
+    # 4. Compound extension (e.g. ".blade.php", ".openapi.yaml")
     first_dot = base.find(".")
     if first_dot != -1:
         compound = base[first_dot:]
         if compound in LANGUAGE_EXTENSIONS:
             return LANGUAGE_EXTENSIONS[compound]
-    # 4. Simple extension
+    # 5. Simple extension
     _, ext = _os.path.splitext(lower)
     return LANGUAGE_EXTENSIONS.get(ext)

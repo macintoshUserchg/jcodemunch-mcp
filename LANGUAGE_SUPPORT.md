@@ -52,8 +52,20 @@
 | Ansible           | `.yaml`, `.yml` (path-detected)                 | custom dict walker (pyyaml)     | class (play names), function (task/handler/role names), constant (variable keys) | — | — | Detected via path heuristics (tasks/, handlers/, group_vars/, site.yml, etc.); requires pyyaml |
 | OpenAPI / Swagger | `.openapi.yaml`, `.openapi.json`, `.swagger.yaml`, `.swagger.json`, `openapi.yaml`, `swagger.json` | custom dict walker (pyyaml + json) | function (path operations: `GET /users`, `POST /orders/{id}`), type (component schemas / v2 definitions) | — | — | Supports OpenAPI 3.x and Swagger 2.0; requires pyyaml for YAML variants |
 | JSON              | `.json`                                         | custom json walker (stdlib)     | constant (top-level object keys)                                                           | — | — | Compound extensions (`.openapi.json`, `.swagger.json`) and well-known basenames are routed to the OpenAPI parser first |
+| Pascal / Delphi   | `.pas`, `.dpr`, `.dpk`, `.lpr`, `.pp`           | tree-sitter-pascal              | function (procedure/function), class, type (record/enum), constant                        | —              | `//` and `{ }` comments       | Object Pascal and Delphi constructs; methods inside class declarations extracted           |
+| MATLAB / Octave   | `.mat`, `.mlx`, `.m`*                           | tree-sitter-matlab              | function, class (classdef), method                                                         | —              | `%` comments                  | `.m` disambiguation: MATLAB if path contains `matlab/`, `toolbox/`, `simulink/`; else Objective-C |
+| Ada               | `.adb`, `.ads`                                  | tree-sitter-ada                 | function (function/procedure), class (package), type, constant                             | —              | `--` preceding comments       | Package-qualified names with `::` separator                                                 |
+| COBOL             | `.cob`, `.cbl`, `.cpy`                          | regex-based                     | class (PROGRAM-ID), function (paragraph/section), constant (01-level data items)           | —              | `*` column 7 comments         | Regex extraction (tree-sitter grammar loses paragraph names)                                |
+| Common Lisp       | `.lisp`, `.cl`, `.lsp`, `.asd`                  | tree-sitter-commonlisp          | function (defun/defmacro/defmethod), class (defclass/defstruct), constant (defvar/defconstant/defparameter) | — | `;;` comments | S-expression based; `defgeneric` treated as function                           |
+| Solidity          | `.sol`                                          | tree-sitter-solidity            | class (contract/library), type (interface/struct/enum/event/error), function (function/modifier), constant (state variable) | — | `//` and `/* */` comments | Contract-scoped qualified names; events and modifiers extracted                 |
+| Zig               | `.zig`, `.zon`                                  | tree-sitter-zig                 | function, class (struct), type (enum/union), constant, function (test declarations)        | —              | `//` comments                 | PascalCase AST node names; `test "name"` blocks extracted as functions                      |
+| PowerShell        | `.ps1`, `.psm1`, `.psd1`                        | tree-sitter-powershell          | function, class, method (class methods), type (enum)                                       | —              | `#` comments                  | Verb-Noun naming convention preserved (e.g. `Get-UserInfo`)                                 |
+| Apex (Salesforce)  | `.cls`, `.trigger`                              | tree-sitter-apex                | class, type (interface/enum), method, function (trigger)                                   | `@annotation`  | `//` and `/* */` comments     | Java-like AST; trigger declarations extracted as top-level functions                        |
+| OCaml             | `.ml`, `.mli`                                   | tree-sitter-ocaml               | function (let bindings with params), class (module/class), type, constant (let bindings without params) | — | `(* *)` comments | Module-scoped nested definitions; `let rec` supported                              |
+| PL/SQL            | `.pls`, `.plb`, `.pck`, `.pkb`, `.pks`          | (routed to SQL parser)          | (same as SQL)                                                                              | —              | `--` and `/* */` comments     | PL/SQL file extensions routed to the existing SQL parser                                    |
 
 \* `.h` uses C++ parsing first, then falls back to C when no C++ symbols are extracted.
+\*\* `.m` defaults to Objective-C unless the file path contains MATLAB indicators (`matlab/`, `toolbox/`, `simulink/`).
 
 ### Text search indexing (symbol extraction planned)
 
@@ -61,9 +73,6 @@ These languages are fully indexed and searchable via `search_text`. Symbol extra
 
 | Language | Extensions     | Notes                                                              |
 | -------- | -------------- | ------------------------------------------------------------------ |
-| Haskell  | `.hs`, `.lhs`  | Basic node types recognized; full extraction requires custom walker |
-| Julia    | `.jl`          | Function nodes detected; signature extraction in progress          |
-| R        | `.r`           | Functions-as-values pattern not yet handled by generic extractor   |
 | TOML     | `.toml`        | Tables indexed; key-as-symbol extractor planned                    |
 
 ---

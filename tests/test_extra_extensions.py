@@ -40,9 +40,9 @@ def test_unknown_language_skipped(caplog):
     """Unknown language values are skipped with a WARNING log."""
     import logging
     with caplog.at_level(logging.WARNING):
-        _apply_with_config({".xyz": "cobol"})
+        _apply_with_config({".xyz": "brainfuck"})
     assert ".xyz" not in LANGUAGE_EXTENSIONS
-    assert any("cobol" in r.message or "cobol" in str(r.args) for r in caplog.records)
+    assert any("brainfuck" in r.message or "brainfuck" in str(r.args) for r in caplog.records)
 
 
 def test_malformed_entry_no_colon(caplog):
@@ -101,7 +101,7 @@ def test_mixed_valid_and_invalid(caplog):
     """Valid entries are applied even when mixed with invalid ones."""
     import logging
     with caplog.at_level(logging.WARNING):
-        _apply_with_config({".cgi": "perl", ".xyz": "cobol", ".psgi": "perl"})
+        _apply_with_config({".cgi": "perl", ".xyz": "brainfuck", ".psgi": "perl"})
     assert LANGUAGE_EXTENSIONS[".cgi"] == "perl"
     assert LANGUAGE_EXTENSIONS[".psgi"] == "perl"
     assert ".xyz" not in LANGUAGE_EXTENSIONS

@@ -2,6 +2,13 @@
 
 All notable changes to jcodemunch-mcp are documented here.
 
+## [1.42.0] — 2026-04-13
+
+### Added
+- **11 new languages** — Pascal/Delphi (`.pas`, `.dpr`, `.dpk`, `.lpr`, `.pp`), MATLAB (`.mat`, `.mlx`, + `.m` path-heuristic disambiguation vs Objective-C), Ada (`.adb`, `.ads`), COBOL (`.cob`, `.cbl`, `.cpy`), Common Lisp (`.lisp`, `.cl`, `.lsp`, `.asd`), Solidity (`.sol`), Zig (`.zig`, `.zon`), PowerShell (`.ps1`, `.psm1`, `.psd1`), Apex/Salesforce (`.cls`, `.trigger`), OCaml (`.ml`, `.mli`), PL/SQL (`.pls`, `.plb`, `.pck`, `.pkb`, `.pks` → existing SQL parser)
+- Custom tree-sitter parsers for all 10 new grammar-backed languages with full symbol extraction: functions, classes, types, constants, methods, and language-specific constructs (COBOL paragraphs/sections, Solidity contracts/events/modifiers, Zig test declarations, Apex triggers, OCaml modules)
+- MATLAB vs Objective-C `.m` file disambiguation via path heuristics (directories named `matlab/`, `toolbox/`, `simulink/` → MATLAB; `ios/`, `xcode/`, `cocoa/` → Objective-C)
+
 ## [1.41.0] — 2026-04-13
 
 ### Added
