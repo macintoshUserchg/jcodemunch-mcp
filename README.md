@@ -368,6 +368,19 @@ DOMAIN=mcp.example.com JCODEMUNCH_HTTP_TOKEN=secret docker compose up -d
 
 See **[GROQ.md](GROQ.md)** for the full tutorial: allowed-tools presets, model recommendations, deployment options, and validation scripts.
 
+### speedreview — AI Code Review GitHub Action
+
+Get a structured PR review in under 5 seconds:
+
+```yaml
+# .github/workflows/speedreview.yml
+- uses: jgravelle/jcodemunch-mcp/speedreview@main
+  with:
+    groq_api_key: ${{ secrets.GROQ_API_KEY }}
+```
+
+See **[speedreview/README.md](speedreview/README.md)** for full setup and configuration.
+
 ---
 
 ## Configuration

@@ -2,6 +2,11 @@
 
 All notable changes to jcodemunch-mcp are documented here.
 
+## [1.38.0] — 2026-04-13
+
+### Added
+- **speedreview GitHub Action** (`speedreview/`) — AI code review in under 5 seconds. Composite action uses jCodeMunch locally for symbol-level diff analysis (`get_changed_symbols` + `get_blast_radius` + `get_ranked_context`) and Groq for sub-2s inference. Posts structured review as PR comment. Usage: `uses: jgravelle/jcodemunch-mcp/speedreview@main`.
+
 ## [1.37.0] — 2026-04-13
 
 ### Added
