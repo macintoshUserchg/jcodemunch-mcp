@@ -2,6 +2,11 @@
 
 All notable changes to jcodemunch-mcp are documented here.
 
+## [1.46.0] — 2026-04-15
+
+### Added
+- **Tectonic Analysis** — new `get_tectonic_map` tool discovers the logical module topology of a codebase by fusing three independent coupling signals: structural (import edges), behavioral (shared symbol references), and temporal (git co-churn). Returns auto-detected file clusters ("plates"), each with an anchor file, cohesion score, inter-plate coupling map, drifter detection (files whose directory doesn't match their logical module), and nexus alerts (god-module risk). Plate count emerges from the topology — no k parameter. Pure Python label propagation, no external dependencies.
+
 ## [1.45.1] — 2026-04-15
 
 ### Documentation

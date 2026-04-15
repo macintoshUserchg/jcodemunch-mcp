@@ -61,7 +61,7 @@ _CANONICAL_TOOL_NAMES: tuple[str, ...] = (
     "get_changed_symbols", "plan_refactoring",
     # Architecture
     "get_dependency_cycles", "get_coupling_metrics", "get_layer_violations",
-    "get_extraction_candidates", "get_cross_repo_map",
+    "get_extraction_candidates", "get_cross_repo_map", "get_tectonic_map",
     # Quality & Metrics
     "get_symbol_complexity", "get_churn_rate", "get_hotspots",
     "get_repo_health", "get_symbol_importance", "find_dead_code",
@@ -107,7 +107,7 @@ _TOOL_TIER_STANDARD: frozenset[str] = _TOOL_TIER_CORE | frozenset({
     "get_untested_symbols", "get_repo_health",
     # Architecture
     "get_dependency_cycles", "get_coupling_metrics", "get_layer_violations",
-    "get_cross_repo_map",
+    "get_cross_repo_map", "get_tectonic_map",
     # Utilities
     "invalidate_cache",
 })
@@ -1848,6 +1848,38 @@ def _build_tools_list() -> list[Tool]:
                 },
             },
         ),
+        Tool(
+            name="get_tectonic_map",
+            description=(
+                "Discover the logical module topology of a codebase by fusing three coupling signals: "
+                "structural (import edges), behavioral (shared symbol references), and temporal "
+                "(git co-churn). Returns tectonic plates (auto-detected file clusters), each with "
+                "an anchor file, cohesion score, inter-plate coupling, and drifters (files whose "
+                "directory doesn't match their logical module). Detects nexus plates (god-module risk: "
+                "coupled to ≥4 other plates). No k parameter — plate count emerges from the topology. "
+                "Use to find hidden module boundaries, misplaced files, and architectural drift."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "repo": {
+                        "type": "string",
+                        "description": "Repository identifier (owner/repo or just repo name)",
+                    },
+                    "days": {
+                        "type": "integer",
+                        "description": "Git co-churn look-back window in days (default 90)",
+                        "default": 90,
+                    },
+                    "min_plate_size": {
+                        "type": "integer",
+                        "description": "Minimum files per plate to include; smaller groups go to isolated_files (default 2)",
+                        "default": 2,
+                    },
+                },
+                "required": ["repo"],
+            },
+        ),
     ]
     # --- Profile filtering ---------------------------------------------------
     profile = config_module.get("tool_profile", "full")
@@ -2820,6 +2852,17 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     storage_path=storage_path,
                 )
             )
+        elif name == "get_tectonic_map":
+            from .tools.get_tectonic_map import get_tectonic_map
+            result = await asyncio.to_thread(
+                functools.partial(
+                    get_tectonic_map,
+                    repo=arguments["repo"],
+                    days=arguments.get("days", 90),
+                    min_plate_size=arguments.get("min_plate_size", 2),
+                    storage_path=storage_path,
+                )
+            )
         else:
             result = {"error": f"Unknown tool: {name}"}
 
@@ -3441,7 +3484,7 @@ def _generate_claude_md_snippet(missing_only: bool = False) -> str:
                               "plan_refactoring"]),
         ("Architecture", ["get_dependency_cycles", "get_coupling_metrics",
                           "get_layer_violations", "get_extraction_candidates",
-                          "get_cross_repo_map"]),
+                          "get_cross_repo_map", "get_tectonic_map"]),
         ("Quality & Metrics", ["get_symbol_complexity", "get_churn_rate", "get_hotspots",
                                 "get_repo_health", "get_symbol_importance",
                                 "find_dead_code", "get_dead_code_v2",

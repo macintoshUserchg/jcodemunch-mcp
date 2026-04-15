@@ -1,7 +1,7 @@
 # jcodemunch-mcp — Project Brief
 
 ## Current State
-- **Version:** 1.45.0 (published to PyPI)
+- **Version:** 1.46.0 (published to PyPI)
 - **INDEX_VERSION:** 8
 - **Tests:** 3040 passed, 9 skipped
 - **Python:** >=3.10
@@ -58,6 +58,7 @@ src/jcodemunch_mcp/
     get_symbol_complexity.py  # get_symbol_complexity: cyclomatic/nesting/param_count for a symbol
     get_churn_rate.py         # get_churn_rate: git commit count for file or symbol over N days
     get_hotspots.py           # get_hotspots: top-N high-risk symbols by complexity x churn
+    get_tectonic_map.py       # get_tectonic_map: logical module topology via 3-signal fusion (structural+behavioral+temporal) + label propagation
     get_repo_health.py        # get_repo_health: one-call triage snapshot (delegate aggregator)
     get_untested_symbols.py   # get_untested_symbols: find functions with no test-file reachability (import graph + name matching)
     audit_agent_config.py    # audit_agent_config: token waste audit for CLAUDE.md, .cursorrules, etc.; cross-refs against index
