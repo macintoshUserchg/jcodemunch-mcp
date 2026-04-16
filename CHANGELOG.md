@@ -2,6 +2,18 @@
 
 All notable changes to jcodemunch-mcp are documented here.
 
+## [1.52.1] — 2026-04-16
+
+### Changed
+- **`plan_refactoring` full language coverage** — import and definition patterns, import rewrite logic, and import formatting extended to ~40 previously-uncovered languages (erlang, solidity, zig, clojure, powershell, ocaml, fsharp, nim, tcl, dlang, pascal, ada, cobol, matlab, apex, css/scss/sass/less/styl, razor, blade, al, nix, ejs, verse, asm, vue, and others). Refactorings in these languages now emit correct edits instead of falling through to a generic default. New `TestLanguageCoverage` suite enforces parity between `LANGUAGE_REGISTRY` and the refactoring patterns so future language additions can't silently drift.
+- **Config tool registry** — `config.py` `all_tools` list updated to include 25+ tools added since last refresh (`audit_agent_config`, `check_rename_safe`, `get_call_hierarchy`, `get_churn_rate`, `get_hotspots`, `get_impact_preview`, `get_pr_risk_profile`, `get_symbol_provenance`, `plan_refactoring`, `render_diagram`, `search_ast`, and more); alphabetically sorted.
+- **Test parametrization** — 4 test files consolidated from 330 individual functions to 78 parametrized ones (322 pytest cases, all assertions preserved). Net −1,508 lines of boilerplate across `test_plan_refactoring.py`, `test_config.py`, `test_find_importers.py`, `test_hardening.py`, and `test_render_diagram.py`.
+
+### Fixed
+- **Test index contamination** — `test_project_intel.py` was orphaning 22 indexes in `~/.code-index/` on each run; now isolated to `tmp_path`.
+
+Thanks to **@MariusAdrian88** for this contribution (#244).
+
 ## [1.52.0] — 2026-04-16
 
 ### Added
