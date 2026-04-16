@@ -1,6 +1,7 @@
 """Tests for tools module."""
 
 import json
+import os
 from pathlib import Path
 import pytest
 from unittest.mock import patch
@@ -900,6 +901,162 @@ class TestTrustedFolders:
         assert any("would normally be rejected as too broad" in w for w in warnings), (
             f"Expected broad bypass warning, got: {warnings}"
         )
+
+
+class TestContainerDetection:
+    """Container environments should allow shallow paths like /workspace."""
+
+    def test_container_env_allows_shallow_path(self, tmp_path):
+        """When REMOTE_CONTAINERS is set, /workspace (2 parts) should be allowed."""
+        from jcodemunch_mcp.tools import index_folder as index_folder_module
+        from unittest.mock import patch
+
+        shallow_root = tmp_path / "ws"
+        shallow_root.mkdir()
+
+        with (
+            patch.object(
+                index_folder_module._config, "load_project_config", return_value=None
+            ),
+            patch.object(
+                index_folder_module._config,
+                "get",
+                side_effect=lambda key, default=None, repo=None: (
+                    [] if key == "trusted_folders" else default
+                ),
+            ),
+            patch(
+                "jcodemunch_mcp.tools.index_folder.Path.resolve",
+                return_value=_platform_path("/workspace"),
+            ),
+            patch("jcodemunch_mcp.tools.index_folder.Path.exists", return_value=True),
+            patch("jcodemunch_mcp.tools.index_folder.Path.is_dir", return_value=True),
+            patch.dict(os.environ, {"REMOTE_CONTAINERS": "true"}),
+        ):
+            result = index_folder_module.index_folder(
+                str(shallow_root),
+                use_ai_summaries=False,
+                storage_path=str(tmp_path / "store"),
+            )
+
+        # Should proceed past the guard (fail later with "No source files")
+        assert result.get("error") != "too broad to index safely"
+        warnings = result.get("warnings", [])
+        assert any("Container environment detected" in w for w in warnings)
+
+    def test_codespaces_env_allows_shallow_path(self, tmp_path):
+        """CODESPACES env var should also trigger container relaxation."""
+        from jcodemunch_mcp.tools import index_folder as index_folder_module
+        from unittest.mock import patch
+
+        shallow_root = tmp_path / "ws"
+        shallow_root.mkdir()
+
+        with (
+            patch.object(
+                index_folder_module._config, "load_project_config", return_value=None
+            ),
+            patch.object(
+                index_folder_module._config,
+                "get",
+                side_effect=lambda key, default=None, repo=None: (
+                    [] if key == "trusted_folders" else default
+                ),
+            ),
+            patch(
+                "jcodemunch_mcp.tools.index_folder.Path.resolve",
+                return_value=_platform_path("/workspaces/myrepo"),
+            ),
+            patch("jcodemunch_mcp.tools.index_folder.Path.exists", return_value=True),
+            patch("jcodemunch_mcp.tools.index_folder.Path.is_dir", return_value=True),
+            patch.dict(os.environ, {"CODESPACES": "true"}),
+        ):
+            result = index_folder_module.index_folder(
+                str(shallow_root),
+                use_ai_summaries=False,
+                storage_path=str(tmp_path / "store"),
+            )
+
+        # /workspaces/myrepo has 3 parts, so no container warning needed
+        assert "too broad" not in result.get("error", "")
+
+    def test_container_still_rejects_bare_root(self, tmp_path):
+        """Even in a container, bare '/' (1 part) should be rejected."""
+        from jcodemunch_mcp.tools import index_folder as index_folder_module
+        from unittest.mock import patch
+
+        shallow_root = tmp_path / "rt"
+        shallow_root.mkdir()
+
+        with (
+            patch.object(
+                index_folder_module._config, "load_project_config", return_value=None
+            ),
+            patch.object(
+                index_folder_module._config,
+                "get",
+                side_effect=lambda key, default=None, repo=None: (
+                    [] if key == "trusted_folders" else default
+                ),
+            ),
+            patch(
+                "jcodemunch_mcp.tools.index_folder.Path.resolve",
+                return_value=_platform_path("/"),
+            ),
+            patch("jcodemunch_mcp.tools.index_folder.Path.exists", return_value=True),
+            patch("jcodemunch_mcp.tools.index_folder.Path.is_dir", return_value=True),
+            patch.dict(os.environ, {"REMOTE_CONTAINERS": "true"}),
+        ):
+            result = index_folder_module.index_folder(
+                str(shallow_root),
+                use_ai_summaries=False,
+                storage_path=str(tmp_path / "store"),
+            )
+
+        assert result["success"] is False
+        assert "too broad to index safely" in result["error"]
+
+    def test_no_container_env_still_rejects_shallow(self, tmp_path):
+        """Without container signals, shallow paths are still rejected."""
+        from jcodemunch_mcp.tools import index_folder as index_folder_module
+        from unittest.mock import patch
+
+        shallow_root = tmp_path / "ws"
+        shallow_root.mkdir()
+
+        # Ensure no container env vars are set
+        env_clean = {
+            k: v for k, v in os.environ.items()
+            if k not in ("REMOTE_CONTAINERS", "CODESPACES", "container")
+        }
+
+        with (
+            patch.object(
+                index_folder_module._config, "load_project_config", return_value=None
+            ),
+            patch.object(
+                index_folder_module._config,
+                "get",
+                side_effect=lambda key, default=None, repo=None: (
+                    [] if key == "trusted_folders" else default
+                ),
+            ),
+            patch(
+                "jcodemunch_mcp.tools.index_folder.Path.resolve",
+                return_value=_platform_path("/workspace"),
+            ),
+            patch("jcodemunch_mcp.tools.index_folder.Path.exists", return_value=True),
+            patch("jcodemunch_mcp.tools.index_folder.Path.is_dir", return_value=True),
+            patch.dict(os.environ, env_clean, clear=True),
+        ):
+            result = index_folder_module.index_folder(
+                str(shallow_root),
+                use_ai_summaries=False,
+                storage_path=str(tmp_path / "store"),
+            )
+
+        assert result["success"] is False
+        assert "too broad to index safely" in result["error"]
 
 
 class TestIndexFolderGitignoreWarning:

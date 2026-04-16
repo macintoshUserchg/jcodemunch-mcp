@@ -109,6 +109,23 @@ def _load_all_gitignores(root: Path) -> dict[Path, pathspec.PathSpec]:
     return specs
 
 
+def _is_container() -> bool:
+    """Detect whether we're running inside a container (Docker, Podman, devcontainer, Codespaces)."""
+    # VS Code devcontainers / GitHub Codespaces set these env vars
+    if os.environ.get("REMOTE_CONTAINERS") or os.environ.get("CODESPACES"):
+        return True
+    # Generic container marker (set by some orchestrators)
+    if os.environ.get("container"):
+        return True
+    # Docker creates this sentinel file (use os.path to avoid pathlib patch interference)
+    if os.path.exists("/.dockerenv"):
+        return True
+    # Podman / cri-o
+    if os.path.exists("/run/.containerenv"):
+        return True
+    return False
+
+
 @lru_cache(maxsize=512)
 def _is_trusted(
     folder_path: Path, trusted_folders: tuple, whitelist_mode: bool = True
@@ -469,7 +486,14 @@ def index_folder(
     # Reject paths with fewer than 3 parts (e.g. "/", "/home", "C:\Users") and
     # warn whenever the caller supplied a relative path so the resolved value is
     # always visible in the tool response.
-    _MIN_PATH_PARTS = 3
+    #
+    # In container environments (Docker, devcontainers, Codespaces, Podman),
+    # projects are commonly mounted at shallow paths like /workspace or /app.
+    # These have only 2 path parts and would be blocked by the default minimum
+    # of 3.  When a container is detected, the minimum is lowered to 2 so that
+    # /workspace works out of the box while bare "/" is still rejected.
+    container = _is_container()
+    _MIN_PATH_PARTS = 2 if container else 3
     if len(folder_path.parts) < _MIN_PATH_PARTS:
         if not is_trusted:
             error_msg = (
@@ -487,6 +511,14 @@ def index_folder(
             "but it matched trusted_folders and was allowed."
         )
         logger.warning(warning_msg)
+        warnings.append(warning_msg)
+
+    if container and len(folder_path.parts) < 3:
+        warning_msg = (
+            f"Container environment detected — allowing shallow path '{folder_path}'. "
+            "The minimum path depth has been relaxed from 3 to 2 components."
+        )
+        logger.info(warning_msg)
         warnings.append(warning_msg)
 
     # Warn when a relative path was given so callers can see what it resolved to.

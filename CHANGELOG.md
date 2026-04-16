@@ -2,6 +2,11 @@
 
 All notable changes to jcodemunch-mcp are documented here.
 
+## [1.50.1] — 2026-04-16
+
+### Fixed
+- **Devcontainer/Docker support** — `index_folder` no longer rejects shallow paths like `/workspace` or `/app` when running inside a container. Auto-detects Docker (`/.dockerenv`), Podman (`/run/.containerenv`), VS Code devcontainers (`REMOTE_CONTAINERS`), GitHub Codespaces (`CODESPACES`), and generic container orchestrators (`container` env var). Minimum path depth is relaxed from 3 to 2 components; bare `/` is still rejected. `trusted_folders` remains available as a manual override. Fixes #243.
+
 ## [1.50.0] — 2026-04-15
 
 ### Added
