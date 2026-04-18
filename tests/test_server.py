@@ -1187,6 +1187,14 @@ def test_generate_template_includes_adaptive_tiering():
     assert "opt-in" in text.lower()
 
 
+def test_generate_template_disabled_tools_reference_includes_runtime_switch_tools():
+    from jcodemunch_mcp.config import generate_template
+
+    text = generate_template()
+    assert '// "set_tool_tier",' in text
+    assert '// "announce_model",' in text
+
+
 def test_upgrade_config_adds_tier_bundle_keys(tmp_path):
     """upgrade_config must append tool_tier_bundles and model_tier_map to old configs."""
     from pathlib import Path

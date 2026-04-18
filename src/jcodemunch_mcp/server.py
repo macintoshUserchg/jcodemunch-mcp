@@ -128,6 +128,9 @@ _PROFILE_TIERS: dict[str, frozenset[str] | None] = {
     "full": None,  # None = no filtering
 }
 
+# Tools that must always remain visible/callable for runtime tier control.
+_ALWAYS_PRESENT_TOOLS: frozenset[str] = frozenset({"set_tool_tier", "announce_model"})
+
 # --- Runtime session tier state -------------------------------------------- #
 import threading
 
@@ -2357,9 +2360,8 @@ def _build_tools_list() -> list[Tool]:
 
     # Force-include runtime tier-switch tools so users can never lose access
     # to their own tier controls via config edits.
-    _ALWAYS_PRESENT = {"set_tool_tier", "announce_model"}
     present_names = {t.name for t in tools}
-    missing = _ALWAYS_PRESENT - present_names
+    missing = _ALWAYS_PRESENT_TOOLS - present_names
     if missing:
         tools.extend(t for t in all_tools if t.name in missing)
 
@@ -2689,7 +2691,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         # Project-level tool disabling: check if tool is disabled for this project
         # Global disabled tools are filtered out in list_tools() schema; project-level
         # rejection happens here since schema is global (can't be changed per-project).
-        if config_module.is_tool_disabled(name, repo=repo_arg):
+        if name not in _ALWAYS_PRESENT_TOOLS and config_module.is_tool_disabled(name, repo=repo_arg):
             return [TextContent(type="text", text=json.dumps({
                 "error": (
                     f"Tool '{name}' is disabled in this project's configuration. "
@@ -3014,9 +3016,6 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             from .tools.plan_turn import plan_turn
             # Extract model for tier-switch piggyback before passing to plan_turn
             model = arguments.pop("model", None) if isinstance(arguments, dict) else None
-            announcement = None
-            if isinstance(model, str) and model:
-                announcement = await _apply_model_announcement(model)
             result = await asyncio.to_thread(
                 functools.partial(
                     plan_turn,
@@ -3026,6 +3025,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     storage_path=storage_path,
                 )
             )
+            announcement = None
+            if isinstance(model, str) and model:
+                announcement = await _apply_model_announcement(model)
             if announcement is not None and isinstance(result, dict):
                 result["tier_announcement"] = announcement
         elif name == "register_edit":

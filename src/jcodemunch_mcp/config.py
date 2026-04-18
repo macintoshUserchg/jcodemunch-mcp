@@ -1170,6 +1170,7 @@ def generate_template() -> str:
     # All available tools (for disabled_tools reference) - sorted alphabetically
     # Removed: wait_for_fresh (v1.12.0 - check_freshness and wait_for_fresh tools removed)
     all_tools = sorted([
+        "announce_model",
         "audit_agent_config",
         "check_references",
         "check_rename_safe",
@@ -1226,6 +1227,7 @@ def generate_template() -> str:
         "search_columns",
         "search_symbols",
         "search_text",
+        "set_tool_tier",
         "suggest_queries",
         "summarize_repo",
         "test_summarizer",

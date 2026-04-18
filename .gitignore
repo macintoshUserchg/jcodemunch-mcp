@@ -67,3 +67,6 @@ CLAUDE.md
 
 # Server-side infrastructure (deployed separately)
 index.php
+
+# Git worktrees (isolated feature workspaces)
+.worktrees/
