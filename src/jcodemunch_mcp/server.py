@@ -164,6 +164,30 @@ def _resolve_tier_bundle(profile: str) -> frozenset[str] | None:
     # Fallback to constants.
     return _PROFILE_TIERS.get(profile)
 
+
+async def _emit_tools_list_changed() -> None:
+    """Send notifications/tools/list_changed to the client, best-effort.
+
+    No-op if the transport / SDK does not support it.
+    """
+    # The basic mcp.server.Server doesn't expose a send_tool_list_changed method.
+    # This is a placeholder for future HTTP/SSE transports that may support it.
+    pass
+
+
+def _log_startup_validation_warnings() -> None:
+    """Emit WARNING logs for any bundle/disabled_tools overlap at startup."""
+    from .tier_resolver import validate_bundle_disabled_overlap
+    try:
+        cfg = {
+            "tool_tier_bundles": config_module.get("tool_tier_bundles") or {},
+            "disabled_tools": config_module.get("disabled_tools") or [],
+        }
+        for msg in validate_bundle_disabled_overlap(cfg):
+            logger.warning(msg)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("startup validation failed: %s", exc, exc_info=True)
+
 # Parameters stripped from tool schemas when compact_schemas is enabled.
 # These are advanced/rarely-used params that cost tokens every session but
 # are used <5% of the time.  The underlying handler still accepts them.
@@ -3618,6 +3642,8 @@ async def run_stdio_server():
     )
     # Feature 10: Restore session state on startup
     _restore_session_state()
+    # Log tier bundle / disabled_tools overlap warnings
+    _log_startup_validation_warnings()
     try:
         async with stdio_server() as (read_stream, write_stream):
             await server.run(
