@@ -1162,3 +1162,52 @@ def test_adaptive_tiering_defaults_false():
 def test_adaptive_tiering_in_config_types():
     from jcodemunch_mcp.config import CONFIG_TYPES
     assert CONFIG_TYPES["adaptive_tiering"] is bool
+
+
+def test_generate_template_includes_tier_bundles_and_model_map():
+    """Template must emit active, uncommented tool_tier_bundles and model_tier_map blocks."""
+    from jcodemunch_mcp.config import generate_template
+
+    text = generate_template()
+    assert '"tool_tier_bundles"' in text
+    assert '"model_tier_map"' in text
+    assert '"core"' in text
+    assert '"claude-opus"' in text
+    assert "disabled_tools applies AFTER tier filtering" in text
+
+
+def test_generate_template_includes_adaptive_tiering():
+    from jcodemunch_mcp.config import generate_template
+    text = generate_template()
+    assert '"adaptive_tiering"' in text
+    assert "opt-in" in text.lower()
+
+
+def test_upgrade_config_adds_tier_bundle_keys(tmp_path):
+    """upgrade_config must append tool_tier_bundles and model_tier_map to old configs."""
+    from pathlib import Path
+    from jcodemunch_mcp.config import upgrade_config
+
+    old_config = tmp_path / "config.jsonc"
+    old_config.write_text(
+        '{\n'
+        '  "tool_profile": "full",\n'
+        '  "disabled_tools": ["test_summarizer"]\n'
+        '}\n',
+        encoding="utf-8",
+    )
+    upgrade_config(old_config)
+    new_text = old_config.read_text(encoding="utf-8")
+    assert "tool_tier_bundles" in new_text
+    assert "model_tier_map" in new_text
+    assert '"tool_profile": "full"' in new_text
+    assert '"test_summarizer"' in new_text
+
+
+def test_upgrade_config_adds_adaptive_tiering(tmp_path):
+    from pathlib import Path
+    from jcodemunch_mcp.config import upgrade_config
+    old = tmp_path / "config.jsonc"
+    old.write_text('{"tool_profile": "full"}\n', encoding="utf-8")
+    upgrade_config(old)
+    assert "adaptive_tiering" in old.read_text(encoding="utf-8")
