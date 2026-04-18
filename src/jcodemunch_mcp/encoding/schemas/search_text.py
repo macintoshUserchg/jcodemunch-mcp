@@ -24,6 +24,7 @@ from .. import schema_driven as sd
 
 TOOLS = ("search_text",)
 ENCODING_ID = "st2"  # bumped from st1: flat rows + typed scalars
+LEGACY_ENCODING_IDS = ("st1",)
 
 # Internal flat row shape used on the wire. `results` (nested) is pre-flattened
 # into this key on encode, and regrouped back into `results` on decode. The

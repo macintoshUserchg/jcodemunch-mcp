@@ -1419,6 +1419,8 @@ def generate_template() -> str:
   // or announce_model) to a tier. Matching is fuzzy: normalize (lowercase,
   // strip provider prefix / date suffix / bracket suffix), then try exact,
   // glob, substring, "*", hardcoded "full" fallback in that order.
+  // Keep keys specific where possible: very short substrings (e.g. "o1") can
+  // over-match model ids that merely contain that token.
   "model_tier_map": {{
     "claude-opus": "full",
     "claude-sonnet": "standard",

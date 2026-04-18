@@ -39,6 +39,53 @@ class TestEmitToolsListChanged:
         """Helper must be a no-op when MCP session isn't available."""
         await server_mod._emit_tools_list_changed()  # must not raise
 
+    @pytest.mark.asyncio
+    async def test_emit_calls_session_send_tool_list_changed(self, monkeypatch):
+        """Integration-style check: use module server.request_context, not _get_mcp_session mocking."""
+
+        class _FakeSession:
+            def __init__(self):
+                self.called = False
+
+            async def send_tool_list_changed(self):
+                self.called = True
+
+        class _FakeRequestContext:
+            def __init__(self, session):
+                self.session = session
+
+        class _FakeServer:
+            def __init__(self, request_context):
+                self.request_context = request_context
+
+        fake_session = _FakeSession()
+        fake_server = _FakeServer(_FakeRequestContext(fake_session))
+        monkeypatch.setattr(server_mod, "server", fake_server)
+
+        await server_mod._emit_tools_list_changed()
+        assert fake_session.called is True
+
+    @pytest.mark.asyncio
+    async def test_emit_warns_when_session_has_no_send_method(self, caplog, monkeypatch):
+        class _FakeSession:
+            pass
+
+        class _FakeRequestContext:
+            def __init__(self, session):
+                self.session = session
+
+        class _FakeServer:
+            def __init__(self, request_context):
+                self.request_context = request_context
+
+        monkeypatch.setattr(server_mod, "server", _FakeServer(_FakeRequestContext(_FakeSession())))
+        caplog.set_level("WARNING")
+
+        await server_mod._emit_tools_list_changed()
+
+        msgs = [r.message for r in caplog.records]
+        assert any("send_tool_list_changed" in m for m in msgs)
+
 
 def test_startup_logs_bundle_disabled_overlap(caplog, monkeypatch):
     monkeypatch.setattr(
@@ -52,6 +99,21 @@ def test_startup_logs_bundle_disabled_overlap(caplog, monkeypatch):
     server_mod._log_startup_validation_warnings()
     msgs = [r.message for r in caplog.records]
     assert any("search_symbols" in m and "disabled_tools" in m for m in msgs)
+
+
+def test_warn_if_http_adaptive_tiering_logs_warning(caplog, monkeypatch):
+    real_get = config_mod.get
+
+    def _fake_get(key, *a, **kw):
+        if key == "adaptive_tiering":
+            return True
+        return real_get(key, *a, **kw)
+
+    monkeypatch.setattr(config_mod, "get", _fake_get)
+    caplog.set_level("WARNING")
+    server_mod._warn_if_http_adaptive_tiering("sse")
+    msgs = [r.message for r in caplog.records]
+    assert any("adaptive_tiering" in m and "transport=sse" in m for m in msgs)
 
 
 # --------------------------------------------------------------------------- #

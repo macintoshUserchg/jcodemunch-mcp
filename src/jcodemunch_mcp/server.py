@@ -175,9 +175,51 @@ async def _emit_tools_list_changed() -> None:
 
     No-op if the transport / SDK does not support it.
     """
-    # The basic mcp.server.Server doesn't expose a send_tool_list_changed method.
-    # This is a placeholder for future HTTP/SSE transports that may support it.
-    pass
+    session = _get_mcp_session(server)
+    if session is None:
+        logger.debug("tools/list_changed skipped: no active MCP session")
+        return
+
+    send_fn = getattr(session, "send_tool_list_changed", None)
+    if send_fn is None:
+        logger.warning("tools/list_changed skipped: session has no send_tool_list_changed()")
+        return
+
+    try:
+        maybe_awaitable = send_fn()
+        if asyncio.iscoroutine(maybe_awaitable):
+            await maybe_awaitable
+    except (RuntimeError, TypeError, AttributeError) as exc:
+        logger.warning("tools/list_changed notification failed: %s", exc, exc_info=True)
+
+
+def _get_mcp_session(mcp_server: Server | None = None) -> Any | None:
+    """Best-effort session lookup from an MCP server instance.
+
+    Returns None when no request context/session is available.
+    """
+    srv = mcp_server if mcp_server is not None else globals().get("server")
+    if srv is None:
+        return None
+    try:
+        request_context = srv.request_context
+    except (LookupError, AttributeError):
+        return None
+    if request_context is None:
+        return None
+    return getattr(request_context, "session", None)
+
+
+def _warn_if_http_adaptive_tiering(transport: str) -> None:
+    """Warn about multi-client risk when adaptive_tiering is used over HTTP."""
+    if not config_module.get("adaptive_tiering", False):
+        return
+    logger.warning(
+        "adaptive_tiering is enabled with transport=%s. "
+        "Tier overrides are process-global and may leak across concurrent HTTP clients. "
+        "Use stdio for single-client sessions or disable adaptive_tiering for HTTP.",
+        transport,
+    )
 
 
 def _log_startup_validation_warnings() -> None:
@@ -3956,6 +3998,8 @@ async def run_sse_server(host: str, port: int):
         __version__, host, port,
         os.path.expanduser(os.environ.get("CODE_INDEX_PATH", "~/.code-index/")),
     )
+    _warn_if_http_adaptive_tiering("sse")
+    _log_startup_validation_warnings()
     # Feature 10: Restore session state on startup
     _restore_session_state()
     config = uvicorn.Config(starlette_app, host=host, port=port, log_level="warning")
@@ -4069,6 +4113,8 @@ async def run_streamable_http_server(host: str, port: int):
         __version__, host, port,
         os.path.expanduser(os.environ.get("CODE_INDEX_PATH", "~/.code-index/")),
     )
+    _warn_if_http_adaptive_tiering("streamable-http")
+    _log_startup_validation_warnings()
     # Feature 10: Restore session state on startup
     _restore_session_state()
     config = uvicorn.Config(starlette_app, host=host, port=port, log_level="warning")
