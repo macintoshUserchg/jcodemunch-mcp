@@ -509,6 +509,63 @@ class TestResolveSpecifierPython:
         # Both return None or string (for relative, could resolve)
         assert result is None or isinstance(result, str)
 
+    def test_nested_source_root_via_conftest_shim(self):
+        """Issue #252: `src/agent_platform/` is both a package AND (via
+        conftest.py sys.path shim) a secondary source root. The structural
+        detector only sees `src/` as the root, so `shared.core.runtime`
+        fails normal resolution. The first-segment fallback should pick it
+        up via the nested `shared` package.
+        """
+        from jcodemunch_mcp.parser.imports import _clear_python_roots_cache
+        _clear_python_roots_cache()
+        files = {
+            "src/agent_platform/__init__.py",
+            "src/agent_platform/shared/__init__.py",
+            "src/agent_platform/shared/core/__init__.py",
+            "src/agent_platform/shared/core/runtime.py",
+            "src/agentz/__init__.py",
+            "tests/test_runtime.py",
+        }
+        result = resolve_specifier("shared.core.runtime", "tests/test_runtime.py", files)
+        assert result == "src/agent_platform/shared/core/runtime.py"
+
+    def test_nested_shim_disambiguates_by_first_segment(self):
+        """The first-segment fallback must not match unrelated packages:
+        importing `shared.core.runtime` should NOT resolve to a similarly
+        named module under a different package whose first segment differs.
+        """
+        from jcodemunch_mcp.parser.imports import _clear_python_roots_cache
+        _clear_python_roots_cache()
+        files = {
+            "src/agent_platform/__init__.py",
+            "src/agent_platform/shared/__init__.py",
+            "src/agent_platform/shared/core/__init__.py",
+            "src/agent_platform/shared/core/runtime.py",
+            "src/unrelated/__init__.py",
+            "src/unrelated/core/__init__.py",
+            "src/unrelated/core/runtime.py",
+            "tests/test_runtime.py",
+        }
+        result = resolve_specifier("shared.core.runtime", "tests/test_runtime.py", files)
+        assert result == "src/agent_platform/shared/core/runtime.py"
+
+    def test_nested_shim_does_not_fire_for_unknown_first_segment(self):
+        """A specifier whose first segment isn't any package in the tree
+        must still return None — the fallback must not degenerate into a
+        suffix sweep.
+        """
+        from jcodemunch_mcp.parser.imports import _clear_python_roots_cache
+        _clear_python_roots_cache()
+        files = {
+            "src/agent_platform/__init__.py",
+            "src/agent_platform/shared/__init__.py",
+            "src/agent_platform/shared/core/__init__.py",
+            "src/agent_platform/shared/core/runtime.py",
+            "tests/test_runtime.py",
+        }
+        # `nonexistent` is not a package name anywhere
+        assert resolve_specifier("nonexistent.core.runtime", "tests/test_runtime.py", files) is None
+
 
 # ---------------------------------------------------------------------------
 # Integration tests: find_importers + find_references via index_folder

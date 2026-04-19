@@ -603,6 +603,14 @@ def _candidates(base: str) -> list[str]:
 # is cached by Python after the first call, so repeat lookups are O(1).
 _python_roots_cache: dict[frozenset, tuple[str, ...]] = {}
 
+# Cache: frozenset(source_files) -> dict mapping package basename to the list
+# of parent directories where a same-named package dir (containing __init__.py)
+# exists. Enables resolving specifiers whose effective source root is injected
+# at runtime by conftest.py / PYTHONPATH / setuptools package_dir — the
+# specifier's first segment names the package, and its parent must be acting
+# as a source root, even if our structural detector can't see that.
+_python_package_parents_cache: dict[frozenset, dict[str, tuple[str, ...]]] = {}
+
 
 def _python_source_roots(source_files) -> tuple[str, ...]:
     """Detect Python package source roots from the indexed file set.
@@ -650,9 +658,37 @@ def _python_source_roots(source_files) -> tuple[str, ...]:
     return result
 
 
+def _python_package_parents(source_files) -> dict[str, tuple[str, ...]]:
+    """Map every package basename to the parent dirs where it appears.
+
+    Used as a resolver fallback for Python layouts where the effective source
+    root is injected at runtime (conftest.py sys.path shim, PYTHONPATH,
+    setuptools ``package_dir``). The import specifier's first segment is the
+    package name; its parent dir must be acting as a source root regardless
+    of whether our structural ``_python_source_roots`` could deduce that.
+    """
+    cache_key = source_files if isinstance(source_files, frozenset) else frozenset(source_files)
+    cached = _python_package_parents_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    parents: dict[str, set[str]] = {}
+    for f in source_files:
+        if f.endswith("/__init__.py"):
+            pkg_dir = f[: -len("/__init__.py")]
+            basename = posixpath.basename(pkg_dir)
+            parent = posixpath.dirname(pkg_dir)
+            parents.setdefault(basename, set()).add(parent)
+
+    result = {name: tuple(sorted(dirs)) for name, dirs in parents.items()}
+    _python_package_parents_cache[cache_key] = result
+    return result
+
+
 def _clear_python_roots_cache() -> None:
     """Test helper: drop the Python source roots cache between tests."""
     _python_roots_cache.clear()
+    _python_package_parents_cache.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -839,6 +875,24 @@ def resolve_specifier(
             for c in _candidates(prefixed):
                 if c in source_files:
                     return c
+        # Fallback for runtime-injected source roots (conftest.py sys.path
+        # shims, PYTHONPATH, setuptools package_dir): the specifier's first
+        # segment names a package that must sit directly under an effective
+        # source root. If that package appears anywhere in the tree, its
+        # parent dir is acting as a source root — even when the structural
+        # detector above can't see that because the parent is itself a
+        # package. Scoped by first-segment match, so no broad suffix sweep.
+        first_segment = specifier.split(".", 1)[0]
+        pkg_parents = _python_package_parents(source_files).get(first_segment)
+        if pkg_parents:
+            seen_roots = set(_python_source_roots(source_files))
+            for parent in pkg_parents:
+                if parent in seen_roots:
+                    continue  # already tried above
+                prefixed = f"{parent}/{module_path}" if parent else module_path
+                for c in _candidates(prefixed):
+                    if c in source_files:
+                        return c
 
     # Alias expansion (tsconfig compilerOptions.paths: @/*, $lib/*, etc.)
     if alias_map:

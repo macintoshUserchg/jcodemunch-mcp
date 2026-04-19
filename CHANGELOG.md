@@ -2,6 +2,17 @@
 
 All notable changes to jcodemunch-mcp are documented here.
 
+## [1.63.0] — 2026-04-19
+
+Python import resolution — fixes under-resolution on layouts where the
+effective source root is injected at runtime (conftest.py sys.path shims,
+`PYTHONPATH`, setuptools `package_dir` with nested roots). Minor bump
+because resolution behavior changes on affected repos; no wire-format or
+session-state changes.
+
+### Fixed
+- **`resolve_specifier` handles runtime-injected Python source roots (closes #252).** On layouts where a nested package dir (e.g. `src/agent_platform/`) is simultaneously a real package AND a sys.path entry, `_python_source_roots` saw only the outer parent as a root, so specifiers like `shared.core.runtime` never resolved — causing `find_importers`, `find_references`, `get_blast_radius`, `get_dependency_graph`, and `find_dead_code` to under-report on affected files. The resolver now falls back to a cached `package_basename → parent_dirs` index and retries against the parents of any package whose name matches the specifier's first dotted segment. Scoped by concrete first-segment evidence in the import itself, not a broad suffix sweep — zero false-positive risk, memory bounded by distinct package-name count. Credit to @vaionetalex (skleung.uk@gmail.com) for the diagnosis and repro.
+
 ## [1.62.0] — 2026-04-19
 
 Audit remediation — wire-format and session-state changes. Minor bump
