@@ -2,6 +2,14 @@
 
 All notable changes to jcodemunch-mcp are documented here.
 
+## [1.61.0] — 2026-04-18
+
+### Added
+- **Per-session tier state makes `adaptive_tiering: true` safe under HTTP (#253).** The process-global `_session_tier_override` is now a session-keyed `OrderedDict` of overrides (LRU-capped at 256 entries). The key is the MCP session's `session_id` when present, otherwise `id(request_context.session)`; stdio and tests fall through to a `"__default__"` sentinel so their behavior is byte-for-byte unchanged. One HTTP client's `plan_turn(model=...)` or `set_tool_tier(...)` call no longer leaks into every other concurrent client on the same process. `set_tool_tier(None)` now evicts the entry rather than storing `None`. New `_reset_session_tiers()` test helper; five new tests cover cross-session isolation, `session_id` preference over identity, LRU eviction, and `None`-evicts semantics.
+
+### Changed
+- **HTTP + `adaptive_tiering: true` is supported again; v1.60.1's `HttpAdaptiveTieringError` refuse-to-start removed (#253).** The guard existed only because the underlying state was process-global; with session-keyed state the misconfiguration no longer exists. The startup hook is now `_note_adaptive_tiering_transport(transport)` — an INFO log when adaptive_tiering runs under `sse` / `streamable-http`, purely for observability. Operators who intentionally rely on the hard-fail should pin v1.60.1.
+
 ## [1.60.1] — 2026-04-18
 
 ### Changed

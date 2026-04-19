@@ -7,16 +7,26 @@ from jcodemunch_mcp import server as server_mod
 from jcodemunch_mcp import config as config_mod
 
 
+def _default_override():
+    """Read the default-session override bucket directly."""
+    return server_mod._session_tier_overrides.get(server_mod._SESSION_TIER_DEFAULT_KEY)
+
+
 class TestSessionTierState:
     def setup_method(self):
-        server_mod._session_tier_override = None
+        server_mod._reset_session_tiers()
 
-    def test_default_is_none(self):
-        assert server_mod._session_tier_override is None
+    def test_default_is_empty(self):
+        assert _default_override() is None
 
     def test_set_get_tier(self):
         server_mod._set_session_tier("core")
-        assert server_mod._session_tier_override == "core"
+        assert _default_override() == "core"
+
+    def test_set_none_evicts_entry(self):
+        server_mod._set_session_tier("core")
+        server_mod._set_session_tier(None)
+        assert server_mod._SESSION_TIER_DEFAULT_KEY not in server_mod._session_tier_overrides
 
     def test_effective_profile_prefers_session(self, monkeypatch):
         """When session tier is set, it overrides config tool_profile."""
@@ -29,8 +39,73 @@ class TestSessionTierState:
             config_mod, "get",
             lambda k, *a, **kw: "standard" if k == "tool_profile" else {}
         )
-        server_mod._session_tier_override = None
+        server_mod._reset_session_tiers()
         assert server_mod._effective_profile() == "standard"
+
+
+class TestPerSessionIsolation:
+    """Two concurrent MCP sessions on the same process must not leak tier state."""
+
+    def setup_method(self):
+        server_mod._reset_session_tiers()
+
+    def teardown_method(self):
+        server_mod._reset_session_tiers()
+
+    def _install_session(self, monkeypatch, session_obj):
+        class _FakeRequestContext:
+            def __init__(self, session):
+                self.session = session
+
+        class _FakeServer:
+            def __init__(self, request_context):
+                self.request_context = request_context
+
+        monkeypatch.setattr(server_mod, "server", _FakeServer(_FakeRequestContext(session_obj)))
+
+    def test_sessions_hold_independent_overrides(self, monkeypatch):
+        session_a = object()
+        session_b = object()
+
+        self._install_session(monkeypatch, session_a)
+        server_mod._set_session_tier("core")
+        assert server_mod._effective_profile() == "core"
+
+        self._install_session(monkeypatch, session_b)
+        assert server_mod._effective_profile() != "core" or len(server_mod._session_tier_overrides) == 1
+        server_mod._set_session_tier("standard")
+        assert server_mod._effective_profile() == "standard"
+
+        self._install_session(monkeypatch, session_a)
+        assert server_mod._effective_profile() == "core"
+
+    def test_session_id_attribute_is_preferred_over_identity(self, monkeypatch):
+        class _Session:
+            session_id = "stable-sid-xyz"
+
+        s1 = _Session()
+        s2 = _Session()  # different object identity, same session_id
+        self._install_session(monkeypatch, s1)
+        server_mod._set_session_tier("core")
+
+        self._install_session(monkeypatch, s2)
+        assert server_mod._effective_profile() == "core"
+
+    def test_lru_cap_evicts_oldest(self, monkeypatch):
+        cap = server_mod._SESSION_TIER_CAP
+        for i in range(cap + 10):
+
+            class _S:
+                pass
+
+            s = _S()
+            s.session_id = f"s-{i}"
+            self._install_session(monkeypatch, s)
+            server_mod._set_session_tier("core")
+
+        assert len(server_mod._session_tier_overrides) <= cap
+        assert "s-0" not in server_mod._session_tier_overrides
+        assert f"s-{cap + 9}" in server_mod._session_tier_overrides
 
 
 class TestEmitToolsListChanged:
@@ -101,7 +176,7 @@ def test_startup_logs_bundle_disabled_overlap(caplog, monkeypatch):
     assert any("search_symbols" in m and "disabled_tools" in m for m in msgs)
 
 
-def test_warn_if_http_adaptive_tiering_refuses_to_start(caplog, monkeypatch):
+def test_note_adaptive_tiering_logs_info_when_enabled(caplog, monkeypatch):
     real_get = config_mod.get
 
     def _fake_get(key, *a, **kw):
@@ -110,14 +185,13 @@ def test_warn_if_http_adaptive_tiering_refuses_to_start(caplog, monkeypatch):
         return real_get(key, *a, **kw)
 
     monkeypatch.setattr(config_mod, "get", _fake_get)
-    caplog.set_level("ERROR")
-    with pytest.raises(server_mod.HttpAdaptiveTieringError):
-        server_mod._warn_if_http_adaptive_tiering("sse")
+    caplog.set_level("INFO")
+    server_mod._note_adaptive_tiering_transport("sse")  # must not raise
     msgs = [r.message for r in caplog.records]
     assert any("adaptive_tiering" in m and "transport=sse" in m for m in msgs)
 
 
-def test_warn_if_http_adaptive_tiering_noop_when_disabled(monkeypatch):
+def test_note_adaptive_tiering_noop_when_disabled(monkeypatch):
     real_get = config_mod.get
 
     def _fake_get(key, *a, **kw):
@@ -126,8 +200,8 @@ def test_warn_if_http_adaptive_tiering_noop_when_disabled(monkeypatch):
         return real_get(key, *a, **kw)
 
     monkeypatch.setattr(config_mod, "get", _fake_get)
-    server_mod._warn_if_http_adaptive_tiering("sse")
-    server_mod._warn_if_http_adaptive_tiering("streamable-http")
+    server_mod._note_adaptive_tiering_transport("sse")
+    server_mod._note_adaptive_tiering_transport("streamable-http")
 
 
 # --------------------------------------------------------------------------- #
@@ -142,7 +216,7 @@ async def test_set_tool_tier_switches_session_tier():
     orig_config = config_mod._GLOBAL_CONFIG.copy()
     config_mod._GLOBAL_CONFIG.clear()
     config_mod._GLOBAL_CONFIG.update(deepcopy(config_mod.DEFAULTS))
-    server_mod._session_tier_override = None
+    server_mod._reset_session_tiers()
 
     try:
         result = await call_tool("set_tool_tier", {"tier": "core"})
@@ -151,11 +225,11 @@ async def test_set_tool_tier_switches_session_tier():
         data = json.loads(text)
         assert data.get("ok") is True
         assert data.get("tier") == "core"
-        assert server_mod._session_tier_override == "core"
+        assert _default_override() == "core"
     finally:
         config_mod._GLOBAL_CONFIG.clear()
         config_mod._GLOBAL_CONFIG.update(orig_config)
-        server_mod._session_tier_override = None
+        server_mod._reset_session_tiers()
 
 
 @pytest.mark.asyncio
@@ -205,7 +279,7 @@ async def test_announce_model_resolves_tier(adaptive_on):
     orig_config = config_mod._GLOBAL_CONFIG.copy()
     config_mod._GLOBAL_CONFIG.clear()
     config_mod._GLOBAL_CONFIG.update(deepcopy(config_mod.DEFAULTS))
-    server_mod._session_tier_override = None
+    server_mod._reset_session_tiers()
 
     try:
         result = await call_tool("announce_model", {"model": "claude-haiku-4-5"})
@@ -215,11 +289,11 @@ async def test_announce_model_resolves_tier(adaptive_on):
         assert data["tier"] == "core"
         assert data["changed"] is True
         assert data["match_reason"].startswith("substring:")
-        assert server_mod._session_tier_override == "core"
+        assert _default_override() == "core"
     finally:
         config_mod._GLOBAL_CONFIG.clear()
         config_mod._GLOBAL_CONFIG.update(orig_config)
-        server_mod._session_tier_override = None
+        server_mod._reset_session_tiers()
 
 
 @pytest.mark.asyncio
@@ -231,7 +305,7 @@ async def test_announce_model_idempotent(adaptive_on):
     orig_config = config_mod._GLOBAL_CONFIG.copy()
     config_mod._GLOBAL_CONFIG.clear()
     config_mod._GLOBAL_CONFIG.update(deepcopy(config_mod.DEFAULTS))
-    server_mod._session_tier_override = None
+    server_mod._reset_session_tiers()
 
     try:
         await call_tool("announce_model", {"model": "claude-haiku-4-5"})
@@ -242,7 +316,7 @@ async def test_announce_model_idempotent(adaptive_on):
     finally:
         config_mod._GLOBAL_CONFIG.clear()
         config_mod._GLOBAL_CONFIG.update(orig_config)
-        server_mod._session_tier_override = None
+        server_mod._reset_session_tiers()
 
 
 @pytest.mark.asyncio
@@ -254,7 +328,7 @@ async def test_announce_model_unknown_falls_back_full(adaptive_on):
     orig_config = config_mod._GLOBAL_CONFIG.copy()
     config_mod._GLOBAL_CONFIG.clear()
     config_mod._GLOBAL_CONFIG.update(deepcopy(config_mod.DEFAULTS))
-    server_mod._session_tier_override = None
+    server_mod._reset_session_tiers()
 
     try:
         result = await call_tool("announce_model", {"model": "totally-new-model-2030"})
@@ -265,7 +339,7 @@ async def test_announce_model_unknown_falls_back_full(adaptive_on):
     finally:
         config_mod._GLOBAL_CONFIG.clear()
         config_mod._GLOBAL_CONFIG.update(orig_config)
-        server_mod._session_tier_override = None
+        server_mod._reset_session_tiers()
 
 
 @pytest.mark.asyncio
@@ -278,7 +352,7 @@ async def test_announce_model_noop_when_adaptive_tiering_disabled():
     orig_config = config_mod._GLOBAL_CONFIG.copy()
     config_mod._GLOBAL_CONFIG.clear()
     config_mod._GLOBAL_CONFIG.update(deepcopy(config_mod.DEFAULTS))
-    server_mod._session_tier_override = None
+    server_mod._reset_session_tiers()
 
     try:
         result = await call_tool("announce_model", {"model": "claude-haiku-4-5"})
@@ -287,11 +361,11 @@ async def test_announce_model_noop_when_adaptive_tiering_disabled():
         assert data["ok"] is True
         assert data["changed"] is False
         assert data.get("adaptive_tiering") is False
-        assert server_mod._session_tier_override is None
+        assert _default_override() is None
     finally:
         config_mod._GLOBAL_CONFIG.clear()
         config_mod._GLOBAL_CONFIG.update(orig_config)
-        server_mod._session_tier_override = None
+        server_mod._reset_session_tiers()
 
 
 # --------------------------------------------------------------------------- #
@@ -308,7 +382,7 @@ async def test_switch_tools_always_present_on_core():
     config_mod._GLOBAL_CONFIG.update(deepcopy(config_mod.DEFAULTS))
     config_mod._GLOBAL_CONFIG["tool_profile"] = "core"
     config_mod._GLOBAL_CONFIG["disabled_tools"] = []
-    server_mod._session_tier_override = "core"
+    server_mod._set_session_tier("core")
 
     try:
         from jcodemunch_mcp.server import list_tools
@@ -319,7 +393,7 @@ async def test_switch_tools_always_present_on_core():
     finally:
         config_mod._GLOBAL_CONFIG.clear()
         config_mod._GLOBAL_CONFIG.update(orig_config)
-        server_mod._session_tier_override = None
+        server_mod._reset_session_tiers()
 
 
 @pytest.mark.asyncio
@@ -355,7 +429,7 @@ async def test_switch_tools_callable_even_when_is_tool_disabled_true(monkeypatch
         "is_tool_disabled",
         lambda name, repo=None: name in {"set_tool_tier", "announce_model"},
     )
-    server_mod._session_tier_override = None
+    server_mod._reset_session_tiers()
 
     try:
         r1 = await call_tool("set_tool_tier", {"tier": "core"})
@@ -367,7 +441,7 @@ async def test_switch_tools_callable_even_when_is_tool_disabled_true(monkeypatch
         d2 = json.loads(r2[0].text if hasattr(r2[0], "text") else r2[0])
         assert "error" not in d2
     finally:
-        server_mod._session_tier_override = None
+        server_mod._reset_session_tiers()
 
 
 # --------------------------------------------------------------------------- #
@@ -384,7 +458,7 @@ async def test_plan_turn_model_piggyback_switches_tier(adaptive_on):
     orig_config = config_mod._GLOBAL_CONFIG.copy()
     config_mod._GLOBAL_CONFIG.clear()
     config_mod._GLOBAL_CONFIG.update(deepcopy(config_mod.DEFAULTS))
-    server_mod._session_tier_override = None
+    server_mod._reset_session_tiers()
 
     try:
         args = {
@@ -395,13 +469,13 @@ async def test_plan_turn_model_piggyback_switches_tier(adaptive_on):
         result = await call_tool("plan_turn", args)
         text = result[0].text if hasattr(result[0], 'text') else result[0]
         data = json.loads(text)
-        assert server_mod._session_tier_override == "standard"
+        assert _default_override() == "standard"
         ann = data.get("tier_announcement", {})
         assert ann.get("tier") == "standard"
     finally:
         config_mod._GLOBAL_CONFIG.clear()
         config_mod._GLOBAL_CONFIG.update(orig_config)
-        server_mod._session_tier_override = None
+        server_mod._reset_session_tiers()
 
 
 @pytest.mark.asyncio
@@ -413,18 +487,18 @@ async def test_plan_turn_without_model_leaves_tier_untouched(adaptive_on):
     orig_config = config_mod._GLOBAL_CONFIG.copy()
     config_mod._GLOBAL_CONFIG.clear()
     config_mod._GLOBAL_CONFIG.update(deepcopy(config_mod.DEFAULTS))
-    server_mod._session_tier_override = "core"
+    server_mod._set_session_tier("core")
 
     try:
         await call_tool(
             "plan_turn",
             {"repo": "local/jcodemunch-mcp-384d867b", "query": "anything"},
         )
-        assert server_mod._session_tier_override == "core"
+        assert _default_override() == "core"
     finally:
         config_mod._GLOBAL_CONFIG.clear()
         config_mod._GLOBAL_CONFIG.update(orig_config)
-        server_mod._session_tier_override = None
+        server_mod._reset_session_tiers()
 
 
 @pytest.mark.asyncio
@@ -438,7 +512,7 @@ async def test_plan_turn_model_noop_when_adaptive_tiering_disabled():
     orig_config = config_mod._GLOBAL_CONFIG.copy()
     config_mod._GLOBAL_CONFIG.clear()
     config_mod._GLOBAL_CONFIG.update(deepcopy(config_mod.DEFAULTS))
-    server_mod._session_tier_override = None
+    server_mod._reset_session_tiers()
 
     try:
         args = {
@@ -449,14 +523,14 @@ async def test_plan_turn_model_noop_when_adaptive_tiering_disabled():
         result = await call_tool("plan_turn", args)
         text = result[0].text if hasattr(result[0], 'text') else result[0]
         data = json.loads(text)
-        assert server_mod._session_tier_override is None
+        assert _default_override() is None
         ann = data.get("tier_announcement", {})
         assert ann.get("changed") is False
         assert ann.get("adaptive_tiering") is False
     finally:
         config_mod._GLOBAL_CONFIG.clear()
         config_mod._GLOBAL_CONFIG.update(orig_config)
-        server_mod._session_tier_override = None
+        server_mod._reset_session_tiers()
 
 
 @pytest.mark.asyncio
@@ -470,7 +544,7 @@ async def test_plan_turn_model_does_not_switch_tier_when_plan_turn_errors(adapti
     orig_config = config_mod._GLOBAL_CONFIG.copy()
     config_mod._GLOBAL_CONFIG.clear()
     config_mod._GLOBAL_CONFIG.update(deepcopy(config_mod.DEFAULTS))
-    server_mod._session_tier_override = None
+    server_mod._reset_session_tiers()
 
     def _boom(*args, **kwargs):
         raise RuntimeError("boom")
@@ -488,8 +562,8 @@ async def test_plan_turn_model_does_not_switch_tier_when_plan_turn_errors(adapti
         data = json.loads(text)
         assert "error" in data
         assert data["summary"] == "RuntimeError: boom"
-        assert server_mod._session_tier_override is None
+        assert _default_override() is None
     finally:
         config_mod._GLOBAL_CONFIG.clear()
         config_mod._GLOBAL_CONFIG.update(orig_config)
-        server_mod._session_tier_override = None
+        server_mod._reset_session_tiers()

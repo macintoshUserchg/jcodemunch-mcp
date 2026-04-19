@@ -133,22 +133,54 @@ _ALWAYS_PRESENT_TOOLS: frozenset[str] = frozenset({"set_tool_tier", "announce_mo
 
 # --- Runtime session tier state -------------------------------------------- #
 import threading
+from collections import OrderedDict
+from typing import Hashable
 
-_session_tier_override: str | None = None
+# Tier overrides are keyed by MCP session identity so concurrent HTTP clients
+# don't clobber each other. Stdio and tests have no active session; they land
+# on the "__default__" sentinel, preserving pre-v1.61 single-session semantics.
+# LRU-capped to bound memory under long-running servers with session churn.
+_SESSION_TIER_CAP = 256
+_SESSION_TIER_DEFAULT_KEY: Hashable = "__default__"
+_session_tier_overrides: "OrderedDict[Hashable, str]" = OrderedDict()
 _session_tier_lock = threading.Lock()
 
 
+def _session_key() -> Hashable:
+    """Return a stable hashable key for the active MCP session."""
+    session = _get_mcp_session()
+    if session is None:
+        return _SESSION_TIER_DEFAULT_KEY
+    sid = getattr(session, "session_id", None)
+    if isinstance(sid, str) and sid:
+        return sid
+    return id(session)
+
+
 def _set_session_tier(tier: str | None) -> None:
-    """Atomically set the session-level tier override. None clears it."""
-    global _session_tier_override
+    """Atomically set (or clear, when tier is None) the active session's override."""
+    key = _session_key()
     with _session_tier_lock:
-        _session_tier_override = tier
+        if tier is None:
+            _session_tier_overrides.pop(key, None)
+            return
+        _session_tier_overrides[key] = tier
+        _session_tier_overrides.move_to_end(key)
+        while len(_session_tier_overrides) > _SESSION_TIER_CAP:
+            _session_tier_overrides.popitem(last=False)
+
+
+def _reset_session_tiers() -> None:
+    """Clear every session's tier override. Test helper."""
+    with _session_tier_lock:
+        _session_tier_overrides.clear()
 
 
 def _effective_profile() -> str:
-    """Return the active tier, preferring session override over config."""
+    """Return the active tier, preferring the session override over config."""
+    key = _session_key()
     with _session_tier_lock:
-        override = _session_tier_override
+        override = _session_tier_overrides.get(key)
     if override is not None:
         return override
     return config_module.get("tool_profile", "full") or "full"
@@ -210,27 +242,19 @@ def _get_mcp_session(mcp_server: Server | None = None) -> Any | None:
     return getattr(request_context, "session", None)
 
 
-class HttpAdaptiveTieringError(SystemExit):
-    """Raised to abort startup when adaptive_tiering is combined with HTTP transport."""
+def _note_adaptive_tiering_transport(transport: str) -> None:
+    """Log an INFO line when adaptive_tiering is active under an HTTP transport.
 
-
-def _warn_if_http_adaptive_tiering(transport: str) -> None:
-    """Refuse to start when adaptive_tiering is combined with HTTP transport.
-
-    Tier state is process-global, so one client's plan_turn(model=...) flip
-    changes the tool surface visible to every other concurrent client on the
-    same server. That's a misconfiguration, not a heads-up condition — emit
-    an ERROR and abort rather than proceed silently.
+    As of v1.61, tier overrides are session-keyed, so HTTP transports handle
+    concurrent clients safely. The v1.60.1 refuse-to-start guard was removed.
+    This hook stays as an observability breadcrumb.
     """
     if not config_module.get("adaptive_tiering", False):
         return
-    message = (
-        f"adaptive_tiering: true is incompatible with transport={transport}. "
-        "Tier overrides are process-global and would leak across concurrent HTTP "
-        "clients. Either run under stdio, or set adaptive_tiering: false in config.jsonc."
+    logger.info(
+        "adaptive_tiering active under transport=%s; tier overrides are session-keyed.",
+        transport,
     )
-    logger.error(message)
-    raise HttpAdaptiveTieringError(f"refusing to start: {message}")
 
 
 def _log_startup_validation_warnings() -> None:
@@ -4017,7 +4041,7 @@ async def run_sse_server(host: str, port: int):
         __version__, host, port,
         os.path.expanduser(os.environ.get("CODE_INDEX_PATH", "~/.code-index/")),
     )
-    _warn_if_http_adaptive_tiering("sse")
+    _note_adaptive_tiering_transport("sse")
     _log_startup_validation_warnings()
     # Feature 10: Restore session state on startup
     _restore_session_state()
@@ -4132,7 +4156,7 @@ async def run_streamable_http_server(host: str, port: int):
         __version__, host, port,
         os.path.expanduser(os.environ.get("CODE_INDEX_PATH", "~/.code-index/")),
     )
-    _warn_if_http_adaptive_tiering("streamable-http")
+    _note_adaptive_tiering_transport("streamable-http")
     _log_startup_validation_warnings()
     # Feature 10: Restore session state on startup
     _restore_session_state()
