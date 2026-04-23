@@ -318,7 +318,7 @@ DEFAULTS = {
             "get_dependency_cycles", "get_coupling_metrics",
             "get_layer_violations", "get_cross_repo_map",
             "get_tectonic_map", "get_signal_chains", "render_diagram",
-            "get_project_intel", "invalidate_cache",
+            "get_project_intel", "invalidate_cache", "get_watch_status",
         ],
     },
     "model_tier_map": {
@@ -1253,6 +1253,7 @@ def generate_template() -> str:
         "get_symbol_source",
         "get_tectonic_map",
         "get_untested_symbols",
+        "get_watch_status",
         "index_file",
         "index_folder",
         "index_repo",

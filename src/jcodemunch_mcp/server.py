@@ -4329,7 +4329,7 @@ def _generate_claude_md_snippet(missing_only: bool = False) -> str:
         ("Diffs & Embeddings", ["get_symbol_diff", "embed_repo"]),
         ("Session-Aware Routing", ["plan_turn", "get_session_context", "get_session_snapshot", "register_edit"]),
         ("Utilities", ["get_session_stats", "invalidate_cache", "test_summarizer",
-                        "audit_agent_config"]),
+                        "audit_agent_config", "get_watch_status"]),
         ("Runtime Tier Switching", ["set_tool_tier", "announce_model"]),
         ("Self-Guide", ["jcodemunch_guide"]),
     ]
