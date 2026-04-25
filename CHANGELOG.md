@@ -2,6 +2,34 @@
 
 All notable changes to jcodemunch-mcp are documented here.
 
+## [1.76.0] — 2026-04-25
+
+### Added — Replayable benchmark + retrieval-quality harness
+- **`benchmarks/replay/` module.** Replayable retrieval-quality fixtures
+  + scoring metrics. Fixtures live in `benchmarks/replay/fixtures/*.json`
+  with shape `{name, repo, repo_sha, queries: [{query, expected_top_k}]}`.
+  Each fixture is the contract a release must keep meeting.
+- **`metrics.py` — nDCG@k, MRR@k, Recall@k.** Pure-Python, dependency-free
+  implementations. Binary-relevance nDCG normalized by ideal DCG;
+  Recall = hits in top-k / total relevant; MRR = reciprocal rank of
+  first relevant within top-k. `aggregate()` averages per-query metrics
+  across a fixture.
+- **`run_replay.py` — harness with regression gate.** Runs every query
+  in a fixture through `search_symbols`, computes per-query and overall
+  metrics, optionally writes `benchmarks/replay/results/{fixture}-v{X}.json`.
+  `--baseline X.Y.Z --gate 0.02` exits non-zero if any aggregate metric
+  drops by more than 2% (configurable) vs the saved baseline. Missing
+  baseline counts as a pass with a "first run" note so new fixtures
+  don't break CI.
+- **`self_v1_75_0` seed fixture (10 queries) locked at 1.0 nDCG/MRR/Recall.**
+  Covers every major surface — `search_symbols`, `compute_confidence`,
+  `analyze_perf`, `record_tool_latency`, `_State`, `ndcg_at_k`,
+  `build_identity_channel`, `ENTRY_POINT_DECORATOR_RE`, etc. Future
+  releases run `run_replay.py --baseline 1.75.0 --gate 0.02` against
+  this fixture as a CI regression guard.
+- 19 tests in `tests/test_replay_metrics.py` (metric math, harness
+  gate logic, fixture-shape contract, baseline lock).
+
 ## [1.75.0] — 2026-04-25
 
 ### Added — Retrieval confidence + token-accounting baseline
