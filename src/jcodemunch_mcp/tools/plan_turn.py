@@ -286,4 +286,6 @@ def plan_turn(
         result["budget_advisor"] = budget_advisor
     if confidence in ("low", "none"):
         result["action"] = "STOP_AND_REPORT_GAP"
+    from ..retrieval.confidence import attach_confidence as _attach_confidence
+    _attach_confidence(result, recommended_symbols)
     return result

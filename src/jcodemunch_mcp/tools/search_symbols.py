@@ -940,6 +940,8 @@ def search_symbols(
         "results": scored_results,
         "_meta": meta,
     }
+    from ..retrieval.confidence import attach_confidence as _attach_confidence
+    _attach_confidence(result, scored_results)
 
     # Feature 1: Add negative_evidence if present
     if negative_evidence is not None:
@@ -1180,6 +1182,8 @@ def _search_symbols_semantic(
         "results": scored_results,
         "_meta": meta,
     }
+    from ..retrieval.confidence import attach_confidence as _attach_confidence
+    _attach_confidence(result, scored_results)
     best_score = max_cos if semantic_only else max_bm25
     if not scored_results or best_score < _ne_threshold:
         # Find files whose names partially match query terms
@@ -1425,6 +1429,8 @@ def _search_symbols_fusion(
         "results": scored_results,
         "_meta": meta,
     }
+    from ..retrieval.confidence import attach_confidence as _attach_confidence
+    _attach_confidence(result, scored_results)
 
     if cacheable and cache_key is not None:
         _result_cache_put(cache_key, result)

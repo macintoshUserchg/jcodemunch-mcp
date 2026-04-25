@@ -2,6 +2,30 @@
 
 All notable changes to jcodemunch-mcp are documented here.
 
+## [1.75.0] — 2026-04-25
+
+### Added — Retrieval confidence + token-accounting baseline
+- **`_meta.confidence` (0–1) on retrieval results.** New
+  `retrieval/confidence.py` exposes `compute_confidence` /
+  `attach_confidence`. The score is a weighted geometric mean of four
+  sub-signals: top-1 vs top-2 score gap, top-1 absolute strength, identity
+  match presence, and result freshness. Wired into all three
+  `search_symbols` paths (BM25, semantic/hybrid, fusion), `plan_turn`, and
+  both `get_ranked_context` paths. Agents can read the number to gate
+  follow-up retrieval calls — high-confidence results don't need a second
+  query, low-confidence results suggest widening or asking the user.
+- **Token-accounting baseline harness.**
+  `benchmarks/harness/capture_token_baseline.py` snapshots the current
+  session's `get_session_stats` + `latency_stats` to
+  `benchmarks/token_baselines/v{VERSION}.json`. Schema: per-tool
+  `{calls, tokens_saved, p50_ms, p95_ms, max_ms}` plus a session summary.
+- **`analyze_perf(compare_release="...")`.** New parameter loads a saved
+  baseline and returns `baseline_diff` — per-tool deltas in tokens_saved
+  and latency vs the live session. Used to catch regressions in
+  compression ratio or per-tool latency drift across releases. Missing
+  baseline is reported via `baseline_meta.found=false` rather than an
+  error.
+
 ## [1.74.0] — 2026-04-25
 
 ### Added — Telemetry foundation (kicks off the multi-release telemetry initiative)

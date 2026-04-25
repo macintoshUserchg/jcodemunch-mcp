@@ -336,6 +336,8 @@ def get_ranked_context(
             **_cost_avoided(tokens_saved, total_saved),
         },
     }
+    from ..retrieval.confidence import attach_confidence as _attach_confidence
+    _attach_confidence(result, context_items)
     if negative_evidence is not None:
         result["negative_evidence"] = negative_evidence
         if negative_evidence["verdict"] == "no_implementation_found":
@@ -465,7 +467,7 @@ def _get_ranked_context_fusion(
     total_saved = record_savings(tokens_saved, tool_name="get_ranked_context")
     elapsed = (time.perf_counter() - start) * 1000
 
-    return {
+    fusion_result = {
         "context_items": context_items,
         "total_tokens": total_tokens,
         "budget_tokens": token_budget,
@@ -480,3 +482,9 @@ def _get_ranked_context_fusion(
             "channels": [ch.name for ch in channels],
         },
     }
+    from ..retrieval.confidence import attach_confidence as _attach_confidence
+    _attach_confidence(
+        fusion_result,
+        [{"score": item.get("fusion_score")} for item in context_items],
+    )
+    return fusion_result

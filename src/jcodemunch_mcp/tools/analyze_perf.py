@@ -3,17 +3,59 @@
 Reads in-memory latency rings (always populated when call_tool fires) and,
 if enabled, persisted rows from telemetry.db. No-op safe when no calls have
 been recorded yet.
+
+Optional ``compare_release`` parameter loads a baseline snapshot from
+``benchmarks/token_baselines/v{X}.json`` (created by
+``capture_token_baseline.py``) and reports per-tool deltas in tokens_saved
+and latency vs the current session.
 """
 
 from __future__ import annotations
 
+import json
 import time
+from pathlib import Path
 from typing import Optional
 
 from ..storage import token_tracker as _tt
 
 
 _DEFAULT_TOP = 20
+
+
+def _baseline_path(version: str) -> Path:
+    """Resolve ``benchmarks/token_baselines/v{version}.json`` from repo root."""
+    here = Path(__file__).resolve()
+    repo_root = here.parents[3]  # tools/.. /jcodemunch_mcp/.. /src/.. /<root>
+    # Walk up until we find a sibling 'benchmarks' dir (works in both
+    # editable installs and a checked-out clone).
+    for ancestor in [repo_root, *repo_root.parents]:
+        candidate = ancestor / "benchmarks" / "token_baselines" / f"v{version}.json"
+        if candidate.exists():
+            return candidate
+    return repo_root / "benchmarks" / "token_baselines" / f"v{version}.json"
+
+
+def _diff_baseline(
+    baseline: dict,
+    current_latency: dict,
+    current_breakdown: dict,
+) -> dict:
+    """Compute per-tool deltas between baseline snapshot and live session."""
+    out: dict = {}
+    base_tools = baseline.get("tools", {})
+    all_tools = set(base_tools) | set(current_latency) | set(current_breakdown)
+    for tool in sorted(all_tools):
+        b = base_tools.get(tool, {})
+        cur_lat = current_latency.get(tool, {})
+        cur_tokens = int(current_breakdown.get(tool, 0))
+        out[tool] = {
+            "tokens_saved_delta": cur_tokens - int(b.get("tokens_saved", 0)),
+            "p50_delta_ms": round(float(cur_lat.get("p50_ms", 0.0)) - float(b.get("p50_ms", 0.0)), 2),
+            "p95_delta_ms": round(float(cur_lat.get("p95_ms", 0.0)) - float(b.get("p95_ms", 0.0)), 2),
+            "calls_delta": int(cur_lat.get("count", 0)) - int(b.get("calls", 0)),
+        }
+    return out
 
 
 def _percentile(sorted_vals: list[float], pct: float) -> float:
@@ -28,6 +70,7 @@ def analyze_perf(
     top: int = _DEFAULT_TOP,
     tool: Optional[str] = None,
     storage_path: Optional[str] = None,
+    compare_release: Optional[str] = None,
 ) -> dict:
     """Return per-tool latency + cache-hit telemetry for the current session
     (and the persisted perf db if perf_telemetry_enabled is set).
@@ -106,8 +149,38 @@ def analyze_perf(
         key=lambda kv: kv[1].get("hit_rate", 0.0),
     )[:top]
 
+    baseline_diff: Optional[dict] = None
+    baseline_meta: Optional[dict] = None
+    if compare_release:
+        baseline_path = _baseline_path(compare_release)
+        if not baseline_path.exists():
+            baseline_meta = {
+                "version": compare_release,
+                "found": False,
+                "looked_at": str(baseline_path),
+            }
+        else:
+            try:
+                baseline = json.loads(baseline_path.read_text())
+                breakdown = _tt.get_session_stats(base_path=storage_path).get(
+                    "tool_breakdown", {}
+                )
+                baseline_diff = _diff_baseline(baseline, in_memory, breakdown)
+                baseline_meta = {
+                    "version": baseline.get("version", compare_release),
+                    "captured_at": baseline.get("captured_at"),
+                    "found": True,
+                    "tools_in_baseline": len(baseline.get("tools", {})),
+                }
+            except Exception as exc:
+                baseline_meta = {
+                    "version": compare_release,
+                    "found": True,
+                    "error": f"Failed to parse baseline: {type(exc).__name__}: {exc}",
+                }
+
     elapsed_ms = round((time.perf_counter() - t0) * 1000, 2)
-    return {
+    out = {
         "window": window,
         "tool": tool,
         "in_memory_session": in_memory,
@@ -129,3 +202,8 @@ def analyze_perf(
         },
         "_meta": {"timing_ms": elapsed_ms},
     }
+    if baseline_meta is not None:
+        out["baseline_meta"] = baseline_meta
+    if baseline_diff is not None:
+        out["baseline_diff"] = baseline_diff
+    return out

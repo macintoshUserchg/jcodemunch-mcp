@@ -1258,6 +1258,10 @@ def _build_tools_list() -> list[Tool]:
                         "type": "string",
                         "description": "Restrict the analysis to a single tool name.",
                     },
+                    "compare_release": {
+                        "type": "string",
+                        "description": "Compare current session against a saved baseline at benchmarks/token_baselines/v{version}.json (e.g. \"1.74.0\"). Adds baseline_diff to the response with per-tool deltas in tokens_saved and latency.",
+                    },
                 },
             }
         ),
@@ -3217,6 +3221,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     top=arguments.get("top", 20),
                     tool=arguments.get("tool"),
                     storage_path=storage_path,
+                    compare_release=arguments.get("compare_release"),
                 )
             )
         elif name == "get_session_context":
