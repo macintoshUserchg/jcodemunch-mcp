@@ -2,6 +2,42 @@
 
 All notable changes to jcodemunch-mcp are documented here.
 
+## [1.79.0] — 2026-04-25
+
+### Added — Online weight tuning (consumes the v1.78.0 ledger)
+- **`retrieval/tuning.py` — `WeightTuner`.** Reads the `ranking_events`
+  table for a given repo, splits events by signal (`semantic_used`,
+  `identity_hit`), and proposes a `±0.05` step on the corresponding
+  weight when the mean confidence delta between groups exceeds 0.05.
+  Bounded — `semantic_weight` clamps to `[0.1, 0.8]` and
+  `identity_boost` clamps to `[0.5, 2.0]`. Defaults to a `min_events=50`
+  threshold so small samples can't move weights.
+- **`tune_weights` MCP tool.** Runs the tuner over every repo in the
+  ledger (or a single `repo`). `dry_run=True` proposes deltas without
+  writing the file; `explain=True` includes the per-signal correlations
+  used in the proposal. Registered in canonical names, standard tier,
+  default `tool_tier_bundles`, init template, CLAUDE.md Utilities
+  snippet, EXCLUDED_FROM_STRICT, AUTO_WATCH_EXCLUDED.
+- **`~/.code-index/tuning.jsonc`.** Per-repo overrides persist as
+  `{repos: {<repo_id>: {semantic_weight?, identity_boost?,
+  learned_from_events, captured_at}}}`. Auto-generated header notes
+  that `tune_weights` will overwrite per-repo entries on the next run.
+- **Query-time application.** `search_symbols` resolves the active
+  `semantic_weight` via `tuning.get_semantic_weight(repo)` when the
+  caller passed the default `0.5`; explicit non-default values always
+  win. The override is only applied when semantic / fusion modes are
+  actively engaged — pure-BM25 calls are untouched.
+- 17 tests in `tests/test_weight_tuning.py` covering get_semantic_weight
+  precedence (explicit / override / default), tuner gating
+  (insufficient events, no-signal, semantic-helps, semantic-hurts,
+  dry-run), JSONC round-trip, tune_weights tool (no repos, all repos,
+  --explain), server registration, and query-time override.
+
+### Verified
+- v1.75.0 replay benchmark gate passes 1.0/1.0/1.0 — no nDCG/MRR/Recall
+  regression. The tuner is additive: with no learned overrides on disk
+  the default behavior is identical.
+
 ## [1.78.0] — 2026-04-25
 
 ### Added — Ranking ledger (data-collection only; no behavior change)

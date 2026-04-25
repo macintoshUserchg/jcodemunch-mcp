@@ -321,7 +321,7 @@ DEFAULTS = {
             "get_layer_violations", "get_cross_repo_map",
             "get_tectonic_map", "get_signal_chains", "render_diagram",
             "get_project_intel", "invalidate_cache", "get_watch_status",
-            "analyze_perf",
+            "analyze_perf", "tune_weights",
         ],
     },
     "model_tier_map": {
@@ -1220,6 +1220,7 @@ def generate_template() -> str:
         "analyze_perf",
         "announce_model",
         "audit_agent_config",
+        "tune_weights",
         "check_references",
         "check_rename_safe",
         "embed_repo",

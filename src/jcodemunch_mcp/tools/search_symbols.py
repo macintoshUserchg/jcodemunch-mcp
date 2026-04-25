@@ -544,6 +544,15 @@ def search_symbols(
     except ValueError as e:
         return {"error": str(e)}
 
+    # v1.79.0 — apply learned per-repo semantic_weight override when the
+    # caller used the default. Treats 0.5 (the function default) as
+    # "unspecified"; explicit non-default values always win.
+    if (semantic or fusion) and semantic_weight == 0.5:
+        from ..retrieval.tuning import get_semantic_weight as _get_tuned_sw
+        semantic_weight = _get_tuned_sw(
+            f"{owner}/{name}", explicit=None, base_path=storage_path
+        )
+
     # Load index
     store = IndexStore(base_path=storage_path)
     index = store.load_index(owner, name)

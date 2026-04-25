@@ -73,7 +73,7 @@ _CANONICAL_TOOL_NAMES: tuple[str, ...] = (
     "get_symbol_diff", "embed_repo",
     # Utilities
     "get_session_stats", "get_session_context", "get_session_snapshot", "plan_turn", "register_edit", "invalidate_cache", "test_summarizer",
-    "audit_agent_config", "get_watch_status", "analyze_perf",
+    "audit_agent_config", "get_watch_status", "analyze_perf", "tune_weights",
     # Runtime tier switching
     "set_tool_tier", "announce_model",
     # Composite retrieval
@@ -120,7 +120,7 @@ _TOOL_TIER_STANDARD: frozenset[str] = _TOOL_TIER_CORE | frozenset({
     "get_cross_repo_map", "get_tectonic_map", "get_signal_chains",
     "render_diagram", "get_project_intel",
     # Utilities
-    "invalidate_cache", "get_watch_status", "analyze_perf",
+    "invalidate_cache", "get_watch_status", "analyze_perf", "tune_weights",
 })
 
 # full = everything (no filter applied)
@@ -397,6 +397,7 @@ _EXCLUDED_FROM_STRICT = frozenset({
     "index_file",
     "invalidate_cache",
     "analyze_perf",
+    "tune_weights",
 })
 
 
@@ -1266,6 +1267,34 @@ def _build_tools_list() -> list[Tool]:
                         "type": "boolean",
                         "default": False,
                         "description": "Include ranking_ledger summary (per-repo and per-tool event counts, average confidence, identity hits, semantic usage). Reads telemetry.db ranking_events table populated since v1.78.0; requires perf_telemetry_enabled.",
+                    },
+                },
+            }
+        ),
+        Tool(
+            name="tune_weights",
+            description="Learn per-repo retrieval weights from the v1.78.0 ranking ledger. Computes confidence correlations for the semantic and identity-match channels and writes overrides to ~/.code-index/tuning.jsonc. search_symbols reads those overrides at query time when the caller doesn't pass an explicit semantic_weight. Safe to re-run; idempotent for stable signal.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "repo": {
+                        "type": "string",
+                        "description": "Limit tuning to a single repo. Default: every repo present in the ledger.",
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Compute proposed deltas without writing tuning.jsonc.",
+                    },
+                    "min_events": {
+                        "type": "integer",
+                        "default": 50,
+                        "description": "Skip repos with fewer ledger events than this (defends against overfitting on small samples).",
+                    },
+                    "explain": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Include per-signal correlations (mean confidence with/without semantic and identity channels) in the response.",
                     },
                 },
             }
@@ -2804,6 +2833,7 @@ _AUTO_WATCH_EXCLUDED = frozenset({
     "get_session_snapshot",
     "index_file",  # path arg is a file path, not a folder; requires repo already indexed
     "analyze_perf",
+    "tune_weights",
 })
 
 
@@ -3228,6 +3258,18 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     storage_path=storage_path,
                     compare_release=arguments.get("compare_release"),
                     ledger=arguments.get("ledger", False),
+                )
+            )
+        elif name == "tune_weights":
+            from .tools.tune_weights import tune_weights
+            result = await asyncio.to_thread(
+                functools.partial(
+                    tune_weights,
+                    repo=arguments.get("repo"),
+                    dry_run=arguments.get("dry_run", False),
+                    min_events=arguments.get("min_events", 50),
+                    explain=arguments.get("explain", False),
+                    storage_path=storage_path,
                 )
             )
         elif name == "get_session_context":
@@ -4389,7 +4431,7 @@ def _generate_claude_md_snippet(missing_only: bool = False) -> str:
                                 "winnow_symbols"]),
         ("Diffs & Embeddings", ["get_symbol_diff", "embed_repo"]),
         ("Session-Aware Routing", ["plan_turn", "get_session_context", "get_session_snapshot", "register_edit"]),
-        ("Utilities", ["get_session_stats", "analyze_perf", "invalidate_cache", "test_summarizer",
+        ("Utilities", ["get_session_stats", "analyze_perf", "tune_weights", "invalidate_cache", "test_summarizer",
                         "audit_agent_config", "get_watch_status"]),
         ("Runtime Tier Switching", ["set_tool_tier", "announce_model"]),
         ("Self-Guide", ["jcodemunch_guide"]),
