@@ -2,6 +2,25 @@
 
 All notable changes to jcodemunch-mcp are documented here.
 
+## [1.80.2] — 2026-04-30 — streamable-http TypeError fix (PR #268)
+
+### Fixed
+- **streamable-http transport raised `TypeError: 'NoneType' object is not
+  callable` on every POST/DELETE** (#267, DrHayt). `handle_mcp` is registered
+  as a Starlette endpoint, and Starlette's `request_response` wrapper invokes
+  the return value as an ASGI response: `await response(scope, receive, send)`.
+  The function wrote the full HTTP exchange directly via
+  `transport.handle_request()` then implicitly returned `None`, so Starlette
+  tried to call `None(...)`. Returning a no-op `_AlreadySent` ASGI sentinel
+  satisfies the wrapper without sending a duplicate response. The timeout
+  branch now returns the `StarletteResponse` directly instead of manually
+  awaiting it on `request._send`.
+- New `tests/test_streamable_http_integration.py` exercises the actual
+  Starlette routing stack via `httpx.ASGITransport` (POST, DELETE, session
+  reuse, 405 on disallowed methods, sequential POSTs). Existing
+  `test_streamable_http_sessions.py` re-implemented routing with mocks and
+  silently masked this regression.
+
 ## [1.80.1] — 2026-04-26 — Scala 3 parser fix (PR #262)
 
 ### Fixed
