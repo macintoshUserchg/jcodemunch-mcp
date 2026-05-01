@@ -25,8 +25,12 @@ jragmunch sweep "TODO\(remove\)" --action remove      # pattern-driven cleanup
 ```
 
 It wraps `claude -p` with jCodeMunch pre-wired, sane allowlists, and structured
-JSON output. Auth-agnostic — uses whatever auth your local `claude` binary
-already has.
+JSON output.
+
+**Billing is subscription-by-default**: jragmunch strips `ANTHROPIC_API_KEY`
+from the subprocess env before spawning `claude`, so the CLI rides your
+Max/Pro OAuth login and you pay $0 in dollars. Pass `--use-api` to opt in
+to billing via the Anthropic API.
 
 If you want the raw recipe, read on.
 
