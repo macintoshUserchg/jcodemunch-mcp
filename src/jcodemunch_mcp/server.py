@@ -4360,7 +4360,7 @@ async def run_streamable_http_server(host: str, port: int):
 
     starlette_app = Starlette(
         routes=[
-            Route("/mcp", app=handle_mcp, methods=["GET", "POST", "DELETE"]),
+            Route("/mcp", app=handle_mcp),
         ],
         middleware=middleware,
     )
