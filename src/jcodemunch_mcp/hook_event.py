@@ -45,6 +45,26 @@ def _resolve_worktree_path(cwd: str, name: str) -> str:
     return str(Path(cwd) / ".claude" / "worktrees" / name)
 
 
+def _resolve_main_repo(cwd: str) -> str:
+    """Return the main repo root, even when *cwd* is inside a worktree.
+
+    Uses ``git rev-parse --git-common-dir`` to find the shared ``.git``
+    directory, then takes its parent.  Falls back to *cwd* on any error.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "-C", cwd, "rev-parse", "--path-format=absolute",
+             "--git-common-dir"],
+            capture_output=True, text=True,
+        )
+        if result.returncode == 0:
+            git_common = result.stdout.strip()
+            return str(Path(git_common).parent)
+    except Exception:
+        pass
+    return cwd
+
+
 def _append_manifest(event_type: str, resolved: str, manifest_path: Path) -> None:
     """Append a single event line to the JSONL manifest."""
     entry = {
@@ -67,8 +87,10 @@ def handle_hook_event(event_type: str, manifest_path: Path | None = None) -> Non
     For 'remove': determines path, runs ``git worktree remove``, records
     to manifest.
 
-    When ``worktreePath`` is provided directly (legacy), the caller already
-    owns the worktree — only manifest recording is performed, no git commands.
+    When ``worktreePath`` is provided directly for a 'create' event, the
+    caller already owns the worktree — only manifest recording is performed.
+    For 'remove', the worktree is still torn down even when the path is
+    provided directly.
 
     Called by Claude Code hooks via:
         jcodemunch-mcp hook-event create
@@ -90,23 +112,30 @@ def handle_hook_event(event_type: str, manifest_path: Path | None = None) -> Non
     cwd = payload.get("cwd", "")
     name = payload.get("name", "")
 
-    # Legacy support: accept worktreePath / worktree_path directly.
-    # When provided, the caller already owns the worktree — skip git commands.
+    # Accept worktreePath / worktree_path directly (Claude Code sends this
+    # for WorktreeRemove).  For 'create' the caller already owns the
+    # worktree — just record the manifest.  For 'remove' we still need to
+    # tear down the worktree and branch.
     legacy_path = payload.get("worktreePath") or payload.get("worktree_path")
 
-    if legacy_path:
+    if legacy_path and event_type == "create":
         resolved = str(Path(legacy_path).resolve())
         _append_manifest(event_type, resolved, manifest_path)
         print(resolved, flush=True)
         return
 
-    # Modern path: Claude Code sends {cwd, name}.
-    if not cwd or not name:
+    if legacy_path:
+        # 'remove' with an explicit path — use it directly.
+        resolved = str(Path(legacy_path).resolve())
+        # Derive name from the last path component for branch cleanup.
+        if not name:
+            name = Path(resolved).name
+    elif cwd and name:
+        worktree_path = _resolve_worktree_path(cwd, name)
+        resolved = str(Path(worktree_path).resolve())
+    else:
         print("ERROR: need cwd+name or worktreePath in stdin payload", file=sys.stderr)
         sys.exit(1)
-
-    worktree_path = _resolve_worktree_path(cwd, name)
-    resolved = str(Path(worktree_path).resolve())
 
     if event_type == "create":
         Path(resolved).parent.mkdir(parents=True, exist_ok=True)
@@ -121,8 +150,11 @@ def handle_hook_event(event_type: str, manifest_path: Path | None = None) -> Non
             sys.exit(1)
 
     elif event_type == "remove":
+        # cwd may be the worktree itself — resolve to the main repo so
+        # git worktree remove doesn't run from inside the tree it's deleting.
+        repo_root = _resolve_main_repo(cwd) if cwd else _resolve_main_repo(resolved)
         result = subprocess.run(
-            ["git", "-C", cwd, "worktree", "remove", resolved, "--force"],
+            ["git", "-C", repo_root, "worktree", "remove", resolved, "--force"],
             capture_output=True,
             text=True,
         )
@@ -133,7 +165,7 @@ def handle_hook_event(event_type: str, manifest_path: Path | None = None) -> Non
         # Clean up the branch created during worktree add.
         branch_name = f"worktree-{name}"
         subprocess.run(
-            ["git", "-C", cwd, "branch", "-D", branch_name],
+            ["git", "-C", repo_root, "branch", "-D", branch_name],
             capture_output=True,
             text=True,
         )
