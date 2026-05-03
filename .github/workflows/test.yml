@@ -19,6 +19,11 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
+        with:
+          # Pin uv to skip the version-manifest fetch from
+          # raw.githubusercontent.com that intermittently fails and takes
+          # down the whole matrix (see run 25292200582). Bump as needed.
+          version: "0.6.5"
 
       - name: Set up Python ${{ matrix.python-version }}
         run: uv python install ${{ matrix.python-version }}
