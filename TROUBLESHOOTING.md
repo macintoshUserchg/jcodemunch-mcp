@@ -2,6 +2,41 @@
 
 Common issues and their solutions.
 
+## Hooks Silently Fail on macOS / Linux ("command not found: jcodemunch-mcp")
+
+**Symptom:** You ran `jcodemunch-mcp init --hooks`, hooks appear in
+`~/.claude/settings.json`, but they never fire — or you see
+`/bin/sh: jcodemunch-mcp: command not found` in Claude Code logs.
+
+**Cause:** Claude Code spawns hooks via `/bin/sh`, **not** your interactive
+shell (zsh / bash). `/bin/sh` uses a minimal PATH (`/usr/bin:/bin:/usr/sbin:/sbin`)
+and does **not** inherit your shell's PATH additions. So if `jcodemunch-mcp`
+lives in `~/.local/bin` (pip `--user`), `~/Library/Python/3.x/bin` (macOS
+framework Python), or a pipx-managed venv, the subshell can't find it even
+though `which jcodemunch-mcp` works fine in your terminal.
+
+**Fix (v1.80.5+):** `init --hooks` now writes the resolved absolute path
+automatically. Just re-run:
+
+```bash
+jcodemunch-mcp init --hooks
+```
+
+It detects the legacy bare-name entries and migrates them. The new commands
+in `~/.claude/settings.json` will look like:
+
+```json
+{"type": "command", "command": "/Users/you/.local/bin/jcodemunch-mcp hook-posttooluse"}
+```
+
+**Manual fix (older versions):** Replace every `jcodemunch-mcp` in
+`~/.claude/settings.json` hook commands with the output of `which jcodemunch-mcp`.
+Quote the path if it contains spaces.
+
+> Credit: reported by a customer running pip `--user` on macOS with zsh.
+
+---
+
 ## "No source files found" / Empty Index
 
 **Symptom:** `index_folder` completes but reports 0 files indexed.

@@ -2,6 +2,39 @@
 
 All notable changes to jcodemunch-mcp are documented here.
 
+## [1.80.5] — 2026-05-02 — Hook PATH fix on macOS/Linux
+
+### Fixed
+- **Enforcement hooks silently failed on macOS/Linux when `jcodemunch-mcp`
+  was installed to `~/.local/bin`, `~/Library/Python/*/bin`, or a pipx
+  venv.** Reported by a paying customer. `init --hooks` was writing the
+  bare command name `jcodemunch-mcp ...` into `~/.claude/settings.json`,
+  but Claude Code spawns hooks via `/bin/sh` — which uses a minimal PATH
+  (`/usr/bin:/bin:/usr/sbin:/sbin`) that doesn't inherit zsh/bash's
+  PATH additions. Result: `command not found: jcodemunch-mcp` on every
+  hook fire.
+- `init --hooks` now resolves the executable via `shutil.which()` at
+  install time and writes the **absolute path** into all 7 hook commands
+  (PreToolUse, PostToolUse, PreCompact, TaskCompleted, SubagentStart,
+  WorktreeCreate, WorktreeRemove). Re-running `init --hooks` migrates
+  legacy bare-name entries automatically (the marker fallback in
+  `_merge_hooks` deduplicates them).
+- Paths containing spaces (e.g. Windows `C:\Program Files\...`) are
+  quoted before being written to settings.json.
+- `_WORKTREE_HOOKS` / `_ENFORCEMENT_HOOKS` constants replaced with
+  `_worktree_hooks()` / `_enforcement_hooks()` builders so the path
+  resolves at install time, not import time.
+- New `_hook_invocation()` helper centralizes the resolution logic.
+
+### Added
+- TROUBLESHOOTING.md entry "Hooks Silently Fail on macOS / Linux" with
+  cause + fix.
+- AGENT_HOOKS.md callout under "Python CLI Hooks" section explaining the
+  absolute-path behavior and how to migrate older installs.
+- 4 new tests in `test_post_tool_use_hook.py` pinning the resolution
+  behavior (absolute path, quoted spaces, bare-name fallback, all 5
+  enforcement events).
+
 ## [1.80.4] — 2026-05-02 — Expanded client coverage in docs
 
 ### Changed

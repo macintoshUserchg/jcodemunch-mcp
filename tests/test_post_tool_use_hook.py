@@ -6,14 +6,15 @@ import pytest
 
 
 class TestEnforcementHooksConstant:
-    """Tests for _ENFORCEMENT_HOOKS constant (upstream v1.21.27)."""
+    """Tests for _enforcement_hooks() builder (upstream v1.21.27; absolute-path fix v1.80.5)."""
 
     def test_enforcement_hooks_has_post_tool_use(self):
-        """_ENFORCEMENT_HOOKS must contain PostToolUse with Edit|Write matcher."""
-        from jcodemunch_mcp.cli.init import _ENFORCEMENT_HOOKS
+        """_enforcement_hooks() must contain PostToolUse with Edit|Write matcher."""
+        from jcodemunch_mcp.cli.init import _enforcement_hooks
 
-        assert "PostToolUse" in _ENFORCEMENT_HOOKS
-        rule = _ENFORCEMENT_HOOKS["PostToolUse"][0]
+        hooks = _enforcement_hooks()
+        assert "PostToolUse" in hooks
+        rule = hooks["PostToolUse"][0]
         matcher = rule["matcher"]
         assert "Edit" in matcher
         assert "Write" in matcher
@@ -21,12 +22,61 @@ class TestEnforcementHooksConstant:
         assert "jcodemunch-mcp" in cmd
 
     def test_enforcement_hooks_has_pre_tool_use(self):
-        """_ENFORCEMENT_HOOKS must contain PreToolUse with Read matcher."""
-        from jcodemunch_mcp.cli.init import _ENFORCEMENT_HOOKS
+        """_enforcement_hooks() must contain PreToolUse with Read matcher."""
+        from jcodemunch_mcp.cli.init import _enforcement_hooks
 
-        assert "PreToolUse" in _ENFORCEMENT_HOOKS
-        rule = _ENFORCEMENT_HOOKS["PreToolUse"][0]
+        hooks = _enforcement_hooks()
+        assert "PreToolUse" in hooks
+        rule = hooks["PreToolUse"][0]
         assert "Read" in rule["matcher"]
+
+    def test_hook_invocation_resolves_absolute_path(self, monkeypatch):
+        """_hook_invocation() must return absolute path when shutil.which finds it.
+
+        Regression: Claude Code spawns hooks via /bin/sh on macOS/Linux which
+        uses a minimal PATH that excludes ~/.local/bin. Bare `jcodemunch-mcp`
+        in settings.json fails with "command not found" on user installs.
+        """
+        from jcodemunch_mcp.cli import init as init_mod
+
+        monkeypatch.setattr(
+            init_mod.shutil, "which",
+            lambda name: "/Users/jane/.local/bin/jcodemunch-mcp" if name == "jcodemunch-mcp" else None,
+        )
+        assert init_mod._hook_invocation() == "/Users/jane/.local/bin/jcodemunch-mcp"
+
+    def test_hook_invocation_quotes_paths_with_spaces(self, monkeypatch):
+        """Paths with spaces (e.g. 'Program Files') must be double-quoted."""
+        from jcodemunch_mcp.cli import init as init_mod
+
+        monkeypatch.setattr(
+            init_mod.shutil, "which",
+            lambda name: r"C:\Program Files\Python312\Scripts\jcodemunch-mcp.exe",
+        )
+        result = init_mod._hook_invocation()
+        assert result.startswith('"') and result.endswith('"')
+        assert "Program Files" in result
+
+    def test_hook_invocation_falls_back_to_bare_name(self, monkeypatch):
+        """If executable can't be located, fall back to bare name."""
+        from jcodemunch_mcp.cli import init as init_mod
+
+        monkeypatch.setattr(init_mod.shutil, "which", lambda name: None)
+        assert init_mod._hook_invocation() == "jcodemunch-mcp"
+
+    def test_enforcement_hooks_use_absolute_path(self, monkeypatch):
+        """All enforcement hook commands must use the resolved absolute path."""
+        from jcodemunch_mcp.cli import init as init_mod
+
+        fake_path = "/opt/homebrew/bin/jcodemunch-mcp"
+        monkeypatch.setattr(init_mod.shutil, "which", lambda name: fake_path)
+
+        hooks = init_mod._enforcement_hooks()
+        for event_rules in hooks.values():
+            for rule in event_rules:
+                for h in rule["hooks"]:
+                    assert h["command"].startswith(fake_path), \
+                        f"Hook command must use absolute path: {h['command']!r}"
 
 
 class TestInstallEnforcementHooksIntegration:

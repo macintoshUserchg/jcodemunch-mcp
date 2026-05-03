@@ -97,39 +97,63 @@ _MCP_ENTRY = {
     "args": ["jcodemunch-mcp"],
 }
 
-_WORKTREE_HOOKS = {
-    "WorktreeCreate": [{
-        "matcher": "",
-        "hooks": [{"type": "command", "command": "jcodemunch-mcp hook-event create"}],
-    }],
-    "WorktreeRemove": [{
-        "matcher": "",
-        "hooks": [{"type": "command", "command": "jcodemunch-mcp hook-event remove"}],
-    }],
-}
+def _hook_invocation() -> str:
+    """Return the executable path used in hook command strings.
 
-_ENFORCEMENT_HOOKS = {
-    "PreToolUse": [{
-        "matcher": "Read",
-        "hooks": [{"type": "command", "command": "jcodemunch-mcp hook-pretooluse"}],
-    }],
-    "PostToolUse": [{
-        "matcher": "Edit|Write",
-        "hooks": [{"type": "command", "command": "jcodemunch-mcp hook-posttooluse"}],
-    }],
-    "PreCompact": [{
-        "matcher": "",
-        "hooks": [{"type": "command", "command": "jcodemunch-mcp hook-precompact"}],
-    }],
-    "TaskCompleted": [{
-        "matcher": "",
-        "hooks": [{"type": "command", "command": "jcodemunch-mcp hook-taskcomplete"}],
-    }],
-    "SubagentStart": [{
-        "matcher": "",
-        "hooks": [{"type": "command", "command": "jcodemunch-mcp hook-subagent-start"}],
-    }],
-}
+    Claude Code spawns hooks via /bin/sh on macOS/Linux, which uses a minimal
+    PATH that excludes ~/.local/bin, ~/Library/Python/*/bin, pipx venvs, etc.
+    Writing the bare name ``jcodemunch-mcp`` into settings.json works only when
+    the user's interactive PATH happens to match the subshell's PATH — fragile.
+    Resolve to an absolute path at install time so hooks work regardless of
+    the spawning shell. Quote if the path contains spaces.
+    """
+    resolved = shutil.which("jcodemunch-mcp")
+    if not resolved:
+        # Fall back to bare name; user will get a clear error if PATH is wrong.
+        return "jcodemunch-mcp"
+    if " " in resolved:
+        return f'"{resolved}"'
+    return resolved
+
+
+def _worktree_hooks() -> dict[str, Any]:
+    exe = _hook_invocation()
+    return {
+        "WorktreeCreate": [{
+            "matcher": "",
+            "hooks": [{"type": "command", "command": f"{exe} hook-event create"}],
+        }],
+        "WorktreeRemove": [{
+            "matcher": "",
+            "hooks": [{"type": "command", "command": f"{exe} hook-event remove"}],
+        }],
+    }
+
+
+def _enforcement_hooks() -> dict[str, Any]:
+    exe = _hook_invocation()
+    return {
+        "PreToolUse": [{
+            "matcher": "Read",
+            "hooks": [{"type": "command", "command": f"{exe} hook-pretooluse"}],
+        }],
+        "PostToolUse": [{
+            "matcher": "Edit|Write",
+            "hooks": [{"type": "command", "command": f"{exe} hook-posttooluse"}],
+        }],
+        "PreCompact": [{
+            "matcher": "",
+            "hooks": [{"type": "command", "command": f"{exe} hook-precompact"}],
+        }],
+        "TaskCompleted": [{
+            "matcher": "",
+            "hooks": [{"type": "command", "command": f"{exe} hook-taskcomplete"}],
+        }],
+        "SubagentStart": [{
+            "matcher": "",
+            "hooks": [{"type": "command", "command": f"{exe} hook-subagent-start"}],
+        }],
+    }
 
 # Cursor rules use MDC format (frontmatter + markdown).
 # alwaysApply: true ensures the rule is in context for every agent turn,
@@ -602,7 +626,7 @@ def install_hooks(*, dry_run: bool = False, backup: bool = True) -> str:
     """
     path = _settings_json_path()
     data = _read_json(path)
-    added = _merge_hooks(data, _WORKTREE_HOOKS, "jcodemunch-mcp hook-event")
+    added = _merge_hooks(data, _worktree_hooks(), "jcodemunch-mcp hook-event")
 
     if not added:
         return f"  hooks already present in {path}"
@@ -623,7 +647,7 @@ def install_enforcement_hooks(*, dry_run: bool = False, backup: bool = True) -> 
     """
     path = _settings_json_path()
     data = _read_json(path)
-    added = _merge_hooks(data, _ENFORCEMENT_HOOKS, "jcodemunch-mcp hook-p")  # matches hook-pretooluse & hook-posttooluse & hook-precompact
+    added = _merge_hooks(data, _enforcement_hooks(), "jcodemunch-mcp hook-p")  # matches hook-pretooluse & hook-posttooluse & hook-precompact
 
     if not added:
         return f"  enforcement hooks already present in {path}"

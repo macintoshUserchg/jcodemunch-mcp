@@ -170,6 +170,14 @@ This installs three Python CLI hooks into `~/.claude/settings.json`:
 
 These hooks are idempotent (safe to re-run), backup-aware, and respect `--dry-run`.
 
+> **macOS / Linux note (v1.80.5+):** `init --hooks` writes the **absolute path**
+> to `jcodemunch-mcp` into `~/.claude/settings.json` — not the bare name. Claude
+> Code spawns hooks via `/bin/sh`, which uses a minimal PATH that does **not**
+> include `~/.local/bin`, `~/Library/Python/*/bin`, or pipx venvs. If you
+> hand-edit hook commands or upgraded from a pre-1.80.5 install with the bare
+> `jcodemunch-mcp ...` form, replace it with the output of `which jcodemunch-mcp`
+> (or simply re-run `jcodemunch-mcp init --hooks` — it'll detect and migrate).
+
 ---
 
 ## Advanced Setup: Shell Script Hooks (Claude Code)
