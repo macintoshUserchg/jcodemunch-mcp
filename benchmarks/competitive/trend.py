@@ -109,16 +109,20 @@ def classify(gap_now: float, gap_prev: float, band_now: float | None) -> str:
     return "widened" if abs(gap_now) > abs(gap_prev) else "narrowed"
 
 
-def movement(history: list[dict], current: dict) -> list[dict]:
+def movement(history: list[dict], current: dict, skip: frozenset = frozenset()) -> list[dict]:
     """One record per comparable row of `current` (a history line). `history`
-    is every earlier line, oldest first; the current line is not in it."""
+    is every earlier line, oldest first; the current line is not in it.
+    `skip` names our own variant rows (DESIGN s5.3): the gap between two of
+    our configurations is not a movement of the field, and without the skip
+    a variant row would be labelled `our improvement`/`our regression`
+    against ourselves whenever jcm's median moved (CF-54 review)."""
     if not history:
         return []
     prev, first = history[-1], history[0]
     out = []
     for key in sorted(current.get("medians", {})):
         axis, tool, corpus = key.split("/", 2)
-        if tool == JCM or axis not in RATIO_AXES + DIFF_AXES:
+        if tool == JCM or tool in skip or axis not in RATIO_AXES + DIFF_AXES:
             continue
         g_now = _gap(current, key)
         if g_now is None:

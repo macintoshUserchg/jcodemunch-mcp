@@ -145,3 +145,16 @@ def test_summary_labels_variants_and_lists_tools_not_called():
     assert "## Movement" in md
     assert "claims" not in md  # D4 over the PRODUCED summary, not the fixture (a check over the input cannot fail against the producer)
     assert "claims" not in json.dumps(trend.line_from_result(result))  # and over the history line --record writes
+
+
+def test_movement_skips_our_variant_rows():
+    """CF-54: a variant of jcodemunch is one of our configurations; its gap to the default is not a
+    movement of the field and must never be labelled `our improvement`/`our regression`."""
+    key, vkey, jkey = "tokens_per_task/other/self", "tokens_per_task/jcodemunch_counter/self", "tokens_per_task/jcodemunch/self"
+    prev = _line("2026-08-01", {key: 3000.0, vkey: 1000.0, jkey: 1000.0}, bands={key: 50.0, vkey: 50.0}, pins={"other": "1.0", "jcodemunch_counter": "p"})
+    cur = _line("2026-09-01", {key: 2000.0, vkey: 1000.0, jkey: 1200.0}, bands={key: 50.0, vkey: 50.0}, pins={"other": "1.0", "jcodemunch_counter": "p"})
+    with_skip = trend.movement([prev], cur, skip=frozenset({"jcodemunch_counter"}))
+    assert [r["tool"] for r in with_skip] == ["other"]
+    without = trend.movement([prev], cur)
+    assert sorted(r["tool"] for r in without) == ["jcodemunch_counter", "other"]
+    assert next(r for r in without if r["tool"] == "jcodemunch_counter")["jcm_moved"] is not None  # what the skip prevents

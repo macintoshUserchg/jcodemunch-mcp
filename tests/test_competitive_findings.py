@@ -203,29 +203,40 @@ def test_module_never_posts():
     assert len(re.findall(r"subprocess\.run\(", src)) == 1
 
 
-def test_our_variant_rows_are_never_drafted():
+def test_our_variant_rows_are_never_drafted_and_a_competitors_variant_still_is():
     """CF-54: a pin declared `variant_of: jcodemunch` is our own row; behind jcm it is not a gap,
-    ahead of a Target it is not a proposal, and a narrowing gap to it is not a watch."""
+    ahead of a Target it is not a proposal, and a narrowing gap to it is not a watch. A pin that
+    is a variant of a COMPETITOR is a competitor row and is drafted like any other (the first
+    draft exempted any truthy `variant_of`; review round 1)."""
     pins = PINS + [{"name": "jcodemunch_counter", "registry": "tree", "package": "jcodemunch-mcp", "version": "c", "ran_as": "c",
-                    "interface": "python", "image_digest": None, "variant_of": "jcodemunch"}]
+                    "interface": "python", "image_digest": None, "variant_of": "jcodemunch"},
+                   {"name": "other_node", "registry": "pypi", "package": "other-tool", "version": "1.2", "ran_as": "1.2",
+                    "interface": "mcp-stdio", "image_digest": "sha256:abc", "variant_of": "other"}]
     rows = [_row("tokens_per_task", "jcodemunch_counter", "self@c", 500.0, 1000.0),       # fewer tokens than jcm: would be a gap for a competitor
             _row("tokens_per_task", "other", "self@c", 500.0, 1000.0),                    # the competitor with the same numbers IS a gap
-            _row("f1_P1", "jcodemunch_counter", "self@c", 0.99, 0.5)]                     # ahead of any Target: would be a proposal for a competitor
+            _row("tokens_per_task", "other_node", "self@c", 500.0, 1000.0)]               # a competitor's variant with the same numbers IS a gap
     res = _result(rows)
     res["header"]["pins"] = pins
     assert findings.ours(res) == {"jcodemunch", "jcodemunch_counter"}
     gaps = findings.gap_drafts(res)
-    assert [g["tool"] for g in gaps] == ["other"]
-    vkey, okey, jkey = "tokens_per_task/jcodemunch_counter/self", "tokens_per_task/other/self", "tokens_per_task/jcodemunch/self"
-    first = _line({vkey: 4000.0, okey: 4000.0, jkey: 1000.0}, bands={vkey: 50.0, okey: 50.0}, pins={"jcodemunch_counter": "a", "other": "1.0"})
-    prev = _line({vkey: 3000.0, okey: 3000.0, jkey: 1000.0}, bands={vkey: 50.0, okey: 50.0}, pins={"jcodemunch_counter": "b", "other": "1.1"})
+    assert sorted(g["tool"] for g in gaps) == ["other", "other_node"]
+    vkey, okey, nkey, jkey = ("tokens_per_task/jcodemunch_counter/self", "tokens_per_task/other/self",
+                              "tokens_per_task/other_node/self", "tokens_per_task/jcodemunch/self")
+    first = _line({vkey: 4000.0, okey: 4000.0, nkey: 4000.0, jkey: 1000.0}, bands={vkey: 50.0, okey: 50.0, nkey: 50.0},
+                  pins={"jcodemunch_counter": "a", "other": "1.0", "other_node": "1.0"})
+    prev = _line({vkey: 3000.0, okey: 3000.0, nkey: 3000.0, jkey: 1000.0}, bands={vkey: 50.0, okey: 50.0, nkey: 50.0},
+                 pins={"jcodemunch_counter": "b", "other": "1.1", "other_node": "1.1"})
     jrow = _row("tokens_per_task", "jcodemunch", "self@c", 1000.0, 1000.0)
     narrowing = _result([_row("tokens_per_task", "jcodemunch_counter", "self@c", 2000.0, 1000.0, band=50.0),
-                         _row("tokens_per_task", "other", "self@c", 2000.0, 1000.0, band=50.0), jrow])
+                         _row("tokens_per_task", "other", "self@c", 2000.0, 1000.0, band=50.0),
+                         _row("tokens_per_task", "other_node", "self@c", 2000.0, 1000.0, band=50.0), jrow])
     narrowing["header"]["pins"] = pins
-    watches = findings.watch_drafts(narrowing, [first, prev])
-    assert [w["tool"] for w in watches] == ["other"]
-    hist = [first, prev]
-    text = "Target: tokens_per_task at or under 900 tokens per task on the self corpus\n"
-    props = findings.standard_drafts(res, hist, text) if hasattr(findings, "standard_drafts") else []
-    assert all(p["tool"] != "jcodemunch_counter" for p in props)
+    assert sorted(w["tool"] for w in findings.watch_drafts(narrowing, [first, prev])) == ["other", "other_node"]
+    # the proposal third: rows on the one axis STANDARD_TARGETS maps, two runs under the Target
+    text = "Target: (b) under 1 s p95; (c) under 20 s cold on the self corpus in CI.\n"
+    ikey_v, ikey_o, ikey_j = "index_cold_seconds/jcodemunch_counter/self", "index_cold_seconds/other/self", "index_cold_seconds/jcodemunch/self"
+    under = _result([_row("index_cold_seconds", "jcodemunch_counter", "self@c", 11.0, 25.0),
+                     _row("index_cold_seconds", "other", "self@c", 11.0, 25.0)])
+    under["header"]["pins"] = pins
+    props = findings.standard_drafts(under, [_line({ikey_v: 12.0, ikey_o: 12.0, ikey_j: 25.0})], text)
+    assert [d["tool"] for d in props] == ["other"]

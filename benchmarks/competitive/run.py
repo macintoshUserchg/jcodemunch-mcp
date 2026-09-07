@@ -301,7 +301,8 @@ def render_md(result: dict, history: list[dict] | None = None) -> str:
             lines.append(f"- `{t['tool']}` {t['category']} on `{t['corpus']}` ({t['tasks']} tasks, every `cited` set empty): NOT COMPARABLE there; hypothesis `{t['hypothesis']}`")
         lines.append("")
     history = history or []
-    lines.append(trend.render(trend.movement(history, trend.line_from_result(result)), len(history)))
+    ours = frozenset(p["name"] for p in h["pins"] if p.get("variant_of") == "jcodemunch")
+    lines.append(trend.render(trend.movement(history, trend.line_from_result(result), skip=ours), len(history)))
     return "\n".join(lines)
 
 

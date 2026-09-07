@@ -104,10 +104,13 @@ def _pin(result: dict, tool: str) -> dict:
 
 
 def ours(result: dict) -> set:
-    """jcodemunch and every pin declared as a variant of it (DESIGN s5.3): our
-    own rows, which are never a gap, a watch or a standard proposal, because
-    a draft about our own configuration is not a finding about the field."""
-    return {JCM} | {p["name"] for p in result["header"].get("pins", []) if p.get("variant_of")}
+    """jcodemunch and every pin declared as a variant OF JCODEMUNCH (DESIGN
+    s5.3): our own rows, which are never a gap, a watch or a standard
+    proposal, because a draft about our own configuration is not a finding
+    about the field. A competitor's variant (`variant_of` naming another
+    tool) is a competitor row and is drafted like any other (review round 1
+    of CF-54: the first draft exempted any truthy `variant_of`)."""
+    return {JCM} | {p["name"] for p in result["header"].get("pins", []) if p.get("variant_of") == JCM}
 
 
 def gap_drafts(result: dict) -> list[dict]:
@@ -144,14 +147,14 @@ def watch_drafts(result: dict, history: list[dict]) -> list[dict]:
     if len(history) < 2:
         return []
     current = trend.line_from_result(result)
-    now = {(m["axis"], m["tool"], m["corpus"]): m for m in trend.movement(history, current)}
-    before = {(m["axis"], m["tool"], m["corpus"]): m for m in trend.movement(history[:-1], history[-1])}
-    out = []
     mine = ours(result)
+    now = {(m["axis"], m["tool"], m["corpus"]): m for m in trend.movement(history, current, skip=mine)}
+    before = {(m["axis"], m["tool"], m["corpus"]): m for m in trend.movement(history[:-1], history[-1], skip=mine)}
+    out = []
     for key, m in now.items():
         axis, tool, corpus = key
         b = before.get(key)
-        if tool in mine or m["movement"] != "narrowed" or not b or b["movement"] != "narrowed" or m["delta_now"] is None:
+        if m["movement"] != "narrowed" or not b or b["movement"] != "narrowed" or m["delta_now"] is None:
             continue
         ahead = (m["delta_now"] > 1.0) if axis in RATIO_AXES else (m["delta_now"] < 0.0)
         if not ahead:
