@@ -103,11 +103,19 @@ def _pin(result: dict, tool: str) -> dict:
     return next((p for p in result["header"]["pins"] if p["name"] == tool), {})
 
 
+def ours(result: dict) -> set:
+    """jcodemunch and every pin declared as a variant of it (DESIGN s5.3): our
+    own rows, which are never a gap, a watch or a standard proposal, because
+    a draft about our own configuration is not a finding about the field."""
+    return {JCM} | {p["name"] for p in result["header"].get("pins", []) if p.get("variant_of")}
+
+
 def gap_drafts(result: dict) -> list[dict]:
     out = []
+    mine = ours(result)
     for r in result["rows"]:
         axis, tool = r["axis"], r["tool"]
-        if tool == JCM or not r.get("meaningful") or not behind(axis, r):
+        if tool in mine or not r.get("meaningful") or not behind(axis, r):
             continue
         if axis == "tools_list_tokens" and _pin(result, tool).get("interface") == "cli":
             continue  # NOT COMPARABLE by FIELD.md: a CLI has no schema cost, which the summary says is a real advantage
@@ -139,10 +147,11 @@ def watch_drafts(result: dict, history: list[dict]) -> list[dict]:
     now = {(m["axis"], m["tool"], m["corpus"]): m for m in trend.movement(history, current)}
     before = {(m["axis"], m["tool"], m["corpus"]): m for m in trend.movement(history[:-1], history[-1])}
     out = []
+    mine = ours(result)
     for key, m in now.items():
         axis, tool, corpus = key
         b = before.get(key)
-        if m["movement"] != "narrowed" or not b or b["movement"] != "narrowed" or m["delta_now"] is None:
+        if tool in mine or m["movement"] != "narrowed" or not b or b["movement"] != "narrowed" or m["delta_now"] is None:
             continue
         ahead = (m["delta_now"] > 1.0) if axis in RATIO_AXES else (m["delta_now"] < 0.0)
         if not ahead:
@@ -180,9 +189,10 @@ def standard_drafts(result: dict, history: list[dict], standard_text: str) -> li
         return []
     prev = history[-1]
     out = []
+    mine = ours(result)
     for r in result["rows"]:
         axis, tool, corpus = r["axis"], r["tool"], r["corpus"]
-        if tool == JCM or axis not in STANDARD_TARGETS or not corpus.startswith("self@") or not r.get("meaningful"):
+        if tool in mine or axis not in STANDARD_TARGETS or not corpus.startswith("self@") or not r.get("meaningful"):
             continue
         tgt = read_target(axis, standard_text)
         if tgt is None:

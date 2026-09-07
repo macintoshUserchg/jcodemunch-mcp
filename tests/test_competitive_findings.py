@@ -201,3 +201,31 @@ def test_module_never_posts():
     imports = {a.name.split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names} | {n.module.split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module}
     assert not imports & {"requests", "urllib", "http", "httpx", "socket"}
     assert len(re.findall(r"subprocess\.run\(", src)) == 1
+
+
+def test_our_variant_rows_are_never_drafted():
+    """CF-54: a pin declared `variant_of: jcodemunch` is our own row; behind jcm it is not a gap,
+    ahead of a Target it is not a proposal, and a narrowing gap to it is not a watch."""
+    pins = PINS + [{"name": "jcodemunch_counter", "registry": "tree", "package": "jcodemunch-mcp", "version": "c", "ran_as": "c",
+                    "interface": "python", "image_digest": None, "variant_of": "jcodemunch"}]
+    rows = [_row("tokens_per_task", "jcodemunch_counter", "self@c", 500.0, 1000.0),       # fewer tokens than jcm: would be a gap for a competitor
+            _row("tokens_per_task", "other", "self@c", 500.0, 1000.0),                    # the competitor with the same numbers IS a gap
+            _row("f1_P1", "jcodemunch_counter", "self@c", 0.99, 0.5)]                     # ahead of any Target: would be a proposal for a competitor
+    res = _result(rows)
+    res["header"]["pins"] = pins
+    assert findings.ours(res) == {"jcodemunch", "jcodemunch_counter"}
+    gaps = findings.gap_drafts(res)
+    assert [g["tool"] for g in gaps] == ["other"]
+    vkey, okey, jkey = "tokens_per_task/jcodemunch_counter/self", "tokens_per_task/other/self", "tokens_per_task/jcodemunch/self"
+    first = _line({vkey: 4000.0, okey: 4000.0, jkey: 1000.0}, bands={vkey: 50.0, okey: 50.0}, pins={"jcodemunch_counter": "a", "other": "1.0"})
+    prev = _line({vkey: 3000.0, okey: 3000.0, jkey: 1000.0}, bands={vkey: 50.0, okey: 50.0}, pins={"jcodemunch_counter": "b", "other": "1.1"})
+    jrow = _row("tokens_per_task", "jcodemunch", "self@c", 1000.0, 1000.0)
+    narrowing = _result([_row("tokens_per_task", "jcodemunch_counter", "self@c", 2000.0, 1000.0, band=50.0),
+                         _row("tokens_per_task", "other", "self@c", 2000.0, 1000.0, band=50.0), jrow])
+    narrowing["header"]["pins"] = pins
+    watches = findings.watch_drafts(narrowing, [first, prev])
+    assert [w["tool"] for w in watches] == ["other"]
+    hist = [first, prev]
+    text = "Target: tokens_per_task at or under 900 tokens per task on the self corpus\n"
+    props = findings.standard_drafts(res, hist, text) if hasattr(findings, "standard_drafts") else []
+    assert all(p["tool"] != "jcodemunch_counter" for p in props)

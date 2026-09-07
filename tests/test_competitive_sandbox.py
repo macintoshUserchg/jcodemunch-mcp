@@ -303,3 +303,48 @@ def test_our_fairness_note_exists_and_argues_the_p2_mapping():
     assert "check_references" in note and "CF-51" in note and "20 FILES" in note
     header = (COMPETE / "adapters" / "jcodemunch.py").read_text(encoding="utf-8")
     assert "fairness/jcodemunch.md" in header
+
+
+def test_our_counter_variant_is_the_same_adapter_with_one_environment_variable(tmp_path, monkeypatch):
+    """CF-54: `jcodemunch_counter` is the default adapter plus JCODEMUNCH_TOOL_SURFACE=counter for the
+    worker, in both sandbox modes; declared as a variant of jcodemunch; registered; never the default."""
+    import importlib
+
+    from adapter import REGISTRY
+    assert REGISTRY["jcodemunch_counter"] == "adapters.jcodemunch:make_counter"
+    jc = importlib.import_module("adapters.jcodemunch")
+    v, d = jc.make_counter("none"), jc.make("none")
+    assert v.variant_of == "jcodemunch" and d.variant_of is None
+    assert v.name == "jcodemunch_counter" and v.categories == d.categories and v.pin.version == d.pin.version
+    assert v.extra_env == {"JCODEMUNCH_TOOL_SURFACE": "counter"} and d.extra_env == {}
+    import run as runner
+    assert "jcodemunch_counter" not in runner.DEFAULT_ADAPTERS
+    # host mode: the worker's environment carries the variable, the default's does not
+    seen = {}
+
+    def fake_run(cmd, env=None, **kw):
+        seen["env"] = env
+        class R:
+            returncode = 1
+            stdout = ""
+            stderr = "stopped by the test"
+        return R()
+    monkeypatch.setattr(jc.subprocess, "run", fake_run)
+    corpus = jc.Corpus(id="self@x", path=tmp_path, sha256="0" * 64, files=())
+    v._run(corpus, tmp_path / "v", [])
+    assert seen["env"]["JCODEMUNCH_TOOL_SURFACE"] == "counter"
+    d._run(corpus, tmp_path / "d", [])
+    assert "JCODEMUNCH_TOOL_SURFACE" not in seen["env"]
+    # docker mode: the variable rides as extra_env, the only host variable the sandbox lets through
+    calls = []
+
+    def fake_sandbox_run(tag, args, corpus_path, out, timeout, **kw):
+        calls.append(kw.get("extra_env"))
+        return jc.sandbox.RunResult(rc=1, stdout="", stderr="stopped by the test", seconds=0.0, timed_out=False)
+    vd, dd = jc.make_counter("docker"), jc.make("docker")
+    monkeypatch.setattr(vd, "image", lambda: None)
+    monkeypatch.setattr(dd, "image", lambda: None)
+    monkeypatch.setattr(jc.sandbox, "run", fake_sandbox_run)
+    vd._run(corpus, tmp_path / "vd", [])
+    dd._run(corpus, tmp_path / "dd", [])
+    assert calls == [{"JCODEMUNCH_TOOL_SURFACE": "counter"}, None]

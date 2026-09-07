@@ -2,9 +2,23 @@
 
 Our row is driven the way the tool's own descriptions say (DESIGN s1.4;
 ARCHAEOLOGY R27, R28): the shipped defaults, no config file, AI summaries
-off, one configuration (the `counter` surface and `include_call_chain`
-variants have no producer yet, CF-54). Every call is charged; nothing is
-tuned to a task set's gold.
+off. Every call is charged; nothing is tuned to a task set's gold.
+
+## The variant row (`jcodemunch_counter`, CF-54)
+
+The same adapter, the same worker, the same calls, with one environment
+variable set for the worker: `JCODEMUNCH_TOOL_SURFACE=counter`, the
+front-door surface (`order`/`menu`/`route` plus the three controls). It
+changes what `tools/list` serves and nothing else the worker does (the
+tasks call the Python tools directly), so its `tools_list_tokens` row is
+the point and every other row of it is the default's repeatability, which
+is useful in its own right. It is labelled `(variant of jcodemunch)` on
+every table, scored against the default like any other row, and never
+drafted as a gap, a watch or a standard proposal (`findings.py::ours`):
+our configuration is not a finding about the field. It is NOT the row a
+user gets by default, which is why it is a variant and not the row. The
+`include_call_chain` variant DESIGN once named is retired: the P2 call is
+`check_references` now, which has no such switch.
 
 ## Call plan
 

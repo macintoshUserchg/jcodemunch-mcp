@@ -147,6 +147,7 @@ REGISTRY: dict[str, str] = {
     "null_readall": "adapters.null_readall:make",
     "null_grep": "adapters.null_grep:make",
     "jcodemunch": "adapters.jcodemunch:make",
+    "jcodemunch_counter": "adapters.jcodemunch:make_counter",  # our variant (DESIGN s5.3, CF-54): a row, never a competitor
     "cymbal": "adapters.cymbal:make",
     "codebase_memory": "adapters.codebase_memory:make",
     "code_review_graph": "adapters.code_review_graph:make",

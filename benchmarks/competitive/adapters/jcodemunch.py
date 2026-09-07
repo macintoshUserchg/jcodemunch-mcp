@@ -7,7 +7,12 @@ purpose:  our own row, driven the way our docs say (ARCHAEOLOGY R27, R28):
           for P4;
           shipped defaults (context providers ON, as index_folder ships them;
           the self-latency harness turns them off and this adapter does not),
-          AI summaries off (R28), no config file
+          AI summaries off (R28), no config file. `make_counter()` is the
+          same adapter with ONE environment variable set for the worker,
+          JCODEMUNCH_TOOL_SURFACE=counter: the front-door surface, reported
+          as a labelled variant under the default (DESIGN s5.3, CF-54); it
+          changes only what tools/list serves, so its tools_list_tokens row
+          is the point and every other row is the default's repeatability
 invokes:  sandbox/jcm_worker.py, ONE code path in two places: inside the
           container built from sandbox/jcodemunch.Dockerfile (the D2 shape
           every competitor runs in) when the sandbox is `docker`, or in a
@@ -75,6 +80,8 @@ class JCodeMunch:
     name = "jcodemunch"
     interface = "python"
     categories = frozenset({"P1", "P2", "P4", "T"})
+    variant_of: str | None = None
+    extra_env: dict[str, str] = {}
 
     def __init__(self, sandbox_mode: str = "docker") -> None:
         self.sandbox_mode = sandbox_mode
@@ -104,13 +111,13 @@ class JCodeMunch:
         if self.sandbox_mode == "docker":
             self.image()
             res = sandbox.run(TAG_PREFIX + self.pin.version, ["/corpus", "/out/jcm-store", "/out/tasks.json", "/out/answers.json"],
-                              corpus.path, out, timeout=20 * 60)
+                              corpus.path, out, timeout=20 * 60, extra_env=dict(self.extra_env) or None)
             rc, tail = res.rc, (res.stderr or res.stdout)[-2000:]
         else:
             store = out / "jcm-store"
             store.mkdir(exist_ok=True)
             env = dict(os.environ, CODE_INDEX_PATH=str(store), PYTHONPATH=str(REPO / "src"),
-                       JCODEMUNCH_TRUSTED_FOLDERS=str(corpus.path), JCODEMUNCH_LIVE_JOURNAL="0")
+                       JCODEMUNCH_TRUSTED_FOLDERS=str(corpus.path), JCODEMUNCH_LIVE_JOURNAL="0", **self.extra_env)
             proc = subprocess.run([sys.executable, str(WORKER), str(corpus.path), str(store), str(out / "tasks.json"), str(out / "answers.json")],
                                   env=env, text=True, capture_output=True, encoding="utf-8", errors="replace", timeout=1200)
             rc, tail = proc.returncode, (proc.stderr or proc.stdout)[-2000:]
@@ -152,6 +159,18 @@ class JCodeMunch:
 
     def version(self) -> str:
         return self.pin.version
+
+
+class JCodeMunchCounter(JCodeMunch):
+    """The `counter` surface: the same worker, the same calls, one environment
+    variable; a labelled variant under the default, never a substitute."""
+    name = "jcodemunch_counter"
+    variant_of = "jcodemunch"
+    extra_env = {"JCODEMUNCH_TOOL_SURFACE": "counter"}
+
+
+def make_counter(sandbox_mode: str = "docker") -> JCodeMunchCounter:
+    return JCodeMunchCounter(sandbox_mode)
 
 
 def make(sandbox_mode: str = "docker") -> JCodeMunch:

@@ -145,8 +145,10 @@ defaults (since 2026-09-06, CF-51: the tier's first runs asked
 `check_references` is the tool whose own description is the usage-site
 question, and its 20-file content cap stays, never raised for a gold;
 `docs/competitive/fairness/jcodemunch.md` argues it). A second
-configuration of ours (`include_call_chain=true`, the `counter` surface) is
-reported as a labelled variant, never silently substituted (CF-54); P4 =
+configuration of ours, the `counter` surface, is reported as a labelled
+variant under the default, never silently substituted (`jcodemunch_counter`
+in the registry, CF-54; the `include_call_chain` variant was retired with
+the P2 mapping, since `check_references` has no such switch); P4 =
 `get_dependency_graph` / `find_importers`. Our
 `tools_list_tokens` is the `full` profile because that is the shipped
 default (D3), with the `counter` figure reported beside it as a variant.
@@ -298,8 +300,11 @@ stable and |delta| outside the band. An unstable row is reported
 ### 5.3 What the summary must say on every run
 
 The per-repo rows before any aggregate (R30, R31); the null rows on every
-table; the band on every table; the jcm variant rows (`counter` surface,
-`include_call_chain`) labelled as variants under the default; the sentence
+table; the band on every table; the jcm variant row (the `counter`
+surface, `jcodemunch_counter`; `include_call_chain` retired with CF-51)
+labelled as a variant under the default and never drafted as a gap, a
+watch or a proposal (our configuration is not a finding about the field);
+the sentence
 "a competitor's README figure is not on this page" in the header, because
 a reader will look for it.
 
