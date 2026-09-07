@@ -172,6 +172,20 @@ request the three profile queries of policy 3c. Hands the draft to the
 `spokesperson` agent for the outward-bound pass. Posts nothing; writes
 `runs/<run>/TRIAGE.md`.
 
+### 2.7 `/competitive-compare [tool] [ref]`
+
+No branch. The competitive loop's interactive form (docs/competitive/DESIGN.md s9.1); LOOPS §2.11.
+
+| Step | Does |
+|---|---|
+| 1 arguments | `tool` a key of `benchmarks/competitive/adapter.REGISTRY` or `all` (default); `ref` default `origin/main`, `git rev-parse --verify` or refuse; `docker info` or refuse (a `--sandbox none` run has no competitor row) |
+| 2 current | `run.py --runs 3 --adapters <the nulls, jcodemunch, the tool or all> --sandbox docker --out-dir evidence/competitive_cur` on the working tree; the corpus and task checks refuse inside it before scoring; never `--record` (the tree's `results/` is the scheduled job's) |
+| 3 ref | `git worktree add <scratch>/competitive-ref <ref>`, same line there with `--out-dir evidence/competitive_ref`; worktree removed after. Never `git checkout` in the working tree. A ref without `run.py` prints `n/a` for its cells. |
+| 4 table | `compare_ref.py --cur … --ref … --out evidence/competitive_compare.md`: per `(axis, tool, corpus)` row in either result file, ref measured and delta, current measured and delta, the current band, and `trend.classify` over the two gaps; the jcm rows first with the signed difference (our movement). `n/a` for an absent side, never 0. Per row, never per total (F-13). The script writes the page; the command retypes none of it. |
+| 5 drafts | `findings.py` over the current file with an empty issue list, to `.claude/state/competitive/drafts/`; counts by label under the table; nothing posted, nothing on the ledger |
+
+Refuses: a ref that does not resolve; an unknown tool; no docker; recording into `benchmarks/competitive/results/`; any write to the ledger.
+
 ## 3. The review subagent (`.claude/agents/reviewer.md`)
 
 **Isolation:** spawned with `subagent_type: reviewer` (fresh context, not
@@ -228,7 +242,7 @@ plus 10 s as the backstop.
 
 | Hook | Event / matcher | Budget | Exact command run | Blocks? |
 |---|---|---|---|---|
-| H1 `pre_commit.py` | `PreToolUse`, matcher `Bash\|PowerShell`, fires when `tool_input.command` matches `\bgit\s+commit\b` | 150 s | If no staged path is under `src/`, `tests/`, `harness/`, `scripts/`, `benchmarks/harness/` or `.github/`: exit 0 (docs commits are free). Else: `uv run python -m harness fast --summary .claude/state/evidence/fast.md` (ruff check and the offline Floor verdicts are inside it); then the format check with the SAME scope and command as `pr-gate.yml` job `fast: format` (read from the workflow file at run time, never restated; `tests/test_workflow_hooks.py` binds them); then `uv run python -m harness check types.error_max` only if pyright is importable, else WARNING naming it. | Exit 2 on any FAIL with the verdict lines as the reason; WARNING + exit 0 past budget, naming which of the three was skipped. |
+| H1 `pre_commit.py` | `PreToolUse`, matcher `Bash\|PowerShell`, fires when `tool_input.command` matches `\bgit\s+commit\b` | 150 s | If no staged path is under `src/`, `tests/`, `harness/`, `scripts/`, `benchmarks/harness/` or `.github/`, and none is a file a Floor's Method reads (`CLAUDE.md`, `benchmarks/schema_baseline.json`, the `rust_fidelity/`, `racket_fidelity/`, `provenance/` and `route_recall/` artifacts; `FLOOR_INPUTS` in the hook, W-39): exit 0 (docs commits are free). Else: `uv run python -m harness fast --summary .claude/state/evidence/fast.md` (ruff check and the offline Floor verdicts are inside it); then the format check with the SAME scope and command as `pr-gate.yml` job `fast: format` (read from the workflow file at run time, never restated; `tests/test_workflow_hooks.py` binds them); then `uv run python -m harness check types.error_max` only if pyright is importable, else WARNING naming it. | Exit 2 on any FAIL with the verdict lines as the reason; WARNING + exit 0 past budget, naming which of the three was skipped. |
 | H2 `test_edit_guard.py` | `PostToolUse`, matcher `Edit\|Write`, when `tool_input.file_path` is under `tests/` | 5 s | `git diff -- <file>` (and `git status --porcelain <file>` for a deletion): counts removed `def test_`, removed `assert`, added `pytest.mark.skip`/`skipif`/`xfail`/`pytest.skip(`. If any, and `harness/retired.json` is unchanged in the working tree AND the file is LOAD-BEARING in `docs/harness/ARCHAEOLOGY.md`: prints the ARCHAEOLOGY line and "retirement needs a `retired.json` entry naming the lesson and the replacement assertion (DoD 11) and a commit message stating the lesson". | Exit 2 (the message reaches the agent as feedback; the edit stands). |
 | H3 `surface_guard.py` | `PostToolUse`, matcher `Edit\|Write`, when the path is `src/jcodemunch_mcp/server.py`, `counter.py`, `cli/policy.py`, any `tools/*.py`, or `encoding/schemas/*` | 40 s | `python scripts/surface_diff.py --base-ref HEAD` (working tree vs HEAD). On a non-empty diff: "tool surface changed: +a -r; README, CLAUDE.md/KEY-FILES, CHANGELOG and the schema baseline change with it (DoD 4); stage 5 checks". Also runs the description dump when W-1 is closed. | Warning only (exit 2 message, no block). |
 | H4 `pre_pr.py` | `PreToolUse`, `Bash\|PowerShell`, command matches `\bgh\s+pr\s+create\b` | 5 s | Reads `.claude/state/full-tier.json` `{tree, ok, date, commit}`; computes the current tree id (`git rev-parse HEAD^{tree}` + sha256 of `git diff` output); requires `ok` and equal tree; requires the branch is not `main`; requires `.claude/state/evidence/checklist.md` exists with no `unmet`. | Exit 2 with the missing item named. |
@@ -309,6 +323,7 @@ A new first section after `Current State`:
 Use these; do not improvise the process. Each one runs the harness at the
 right moments and produces the Definition-of-Done checklist itself.
 /feature <desc> · /fix-issue <n> · /release · /benchmark-compare [ref] ·
+/competitive-compare [tool] [ref] ·
 /review [pr|ref] · /triage-issue <n>
 Authority: docs/standard/STANDARD.md (what good means, Definition of Done),
 docs/harness/ARCHAEOLOGY.md (why every test exists), docs/cicd/RUNBOOK.md

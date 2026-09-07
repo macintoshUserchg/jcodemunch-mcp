@@ -2,6 +2,376 @@
 
 ## [Unreleased]
 
+### Added - `/competitive-compare [tool] [ref]`, the competitive tier's interactive form
+
+A session that changed retrieval can ask how the change moved every
+competitive row before opening a PR: the tier runs on the working tree
+and in a worktree of a ref (one adapter or all, three repetitions, in the
+container, the corpus and task checks refusing before scoring), and one
+table shows each row's ref and current values, the band, and the
+movement between them, with our own rows first. Drafts go to a state
+directory the ledger never reads, nothing is recorded into the tree's
+results, and nothing here types a number.
+
+### Added - the competitive tier's scheduled jobs, switched off until a human turns them on (FINDINGS CF-57, CF-58)
+
+Three workflows in the inbound layer's shape: a monthly run of every
+adapter over the pinned set in the container, its result and drafts
+pushed to the ledger branch by the App; a weekly release feed that reads
+registries on a read-only token, drafts an idea when a release title
+names a capability (the title quoted as data under the inbound preamble,
+the body matched and discarded) and dispatches a re-run when a release
+names a measured axis; and a daily post job that turns a draft a human
+marked approved into one labelled issue and writes the number back.
+Every write follows a kill-switch read with the App token in the same
+job; the job that runs competitor code holds no App token and writes
+nothing; the only push target is the ledger branch; each job has a
+budget row (model-free, zero cost) and the policy table names them.
+The post job needs a second variable that does not exist, so nothing can
+post; the labels do not exist either. A test file holds the workflows to
+those properties, the inbound workflow tests being the template.
+
+### Added - the competitive tier drafts its findings as issues, and posts none of them (FINDINGS CF-56)
+
+`benchmarks/competitive/findings.py` reads a recorded result file and
+the history and writes one draft per finding to a scratch directory, in
+the issue-template shape with a fingerprint line, `approved: false` and
+the `needs-human` label: a gap where a competitor is meaningfully ahead
+(with our median and spread, theirs, the band, the competitor's pinned
+release and image digest, the run file, and a first hypothesis from a
+fixed list chosen by rule, never a fix); a watch where we are ahead and
+the gap narrowed on two consecutive recorded runs; a standard proposal
+where a competitor beat a STANDARD.md Target on two runs, quoting the
+Target verbatim and proposing a Target in the same units, never a Floor,
+and saying in its first line that the standard is edited only by a
+human. Duplicates are ruled out by reading the tracker's `competitive-*`
+issues for the fingerprint: an open one is updated in place, a closed one
+is named, and a tracker that cannot be read refuses the whole run rather
+than risk a second issue. The module's only tracker verb is `issue list`,
+asserted by a test. The first run over three corpora drafts more than
+eighty gaps, and the ones worth reading first are those where a null
+baseline is ahead of us (CF-56); the release-feed drafts wait for the
+scheduled job.
+
+### Added - the competitive tier's trend tracking: the summary says how every gap moved, and whose release was beside it (FINDINGS CF-54, CF-55)
+
+A recorded run used to leave one line of medians in the history file
+and nothing read it back. `benchmarks/competitive/trend.py` now writes
+the line with the band and the gap per row and renders a *Movement*
+section at the end of every summary: per row, the delta on this run,
+the previous recorded run and the first, the movement judged against
+this run's band (`unchanged` inside it, `flipped` on a sign change,
+`widened` or `narrowed` on magnitude, `no band recorded` rather than a
+band invented for an older line), and the competitor's release on each
+of the three runs beside it, stated as a fact on the same line and
+never as a cause. A row where our own value moved past the band while
+their release did not is named our regression or our improvement, by
+the axis's direction. The self corpus's history key is normalised to
+`self` because its id carries the running commit, which made every self
+row a first run forever on the first render (CF-55). The summary also
+lists the tools-not-called rows and labels a variant adapter under its
+default; the jcm `counter` variant the design asks for has no producer
+yet and is recorded as open (CF-54).
+
+### Added - the competitive tier's corpus and task fairness checks, and the corpus set it needed to pass them (FINDINGS CF-46 to CF-48)
+
+A comparison over one language, one domain and small modular repositories
+flatters symbol search, so `benchmarks/competitive/corpus_check.py` now
+judges the SET of corpora before anything is scored, criterion by
+criterion, with every threshold read from `corpus_policy.json` and the
+verdict recorded in the result header; a failing set stops the run (exit
+5) instead of producing a table. The three corpora pinned by
+`benchmarks/tasks.json` plus this tree's own `src/` fail it on two
+criteria (the language count and one language's share), not the four the
+design predicted (CF-46), so `corpora.json` pins five more by full SHA
+(a utility library, an HTTP client library, a TypeScript monorepo and two
+repositories over 10,000 files in different languages; one alone puts its
+language over the cap, which is why there are two) and `corpora.py`
+fetches them by SHA into a cache OUTSIDE the tree, because `benchmarks/`
+ships in the sdist. `task_check.py` refuses a malformed or unanswerable
+task and keeps a task only one side can answer out of every head-to-head
+table, symmetrically; after a run it names a tool that cited nothing on
+every P task of a corpus, the shape of an adapter silently not called.
+The tasks themselves: for three corpora a third party's rules
+(sverklo-bench, CC-BY-4.0, pinned by commit) reproduced by
+`tasks/from_sverklo.py`, each hand-verified definition line re-verified
+at our SHA so a moved line refuses the generator and the three tasks that
+do not exist at our SHAs are dropped with the reason (CF-48); for the
+other three, symbols chosen by one author with expected sets computed by
+the same rules, never typed. One author wrote every adapter and every
+task, which the design's independence rule forbids and one agent cannot
+meet; it is recorded, not softened (CF-47). `run.py` takes `--set`,
+`--only`, a `--tasks` directory, and `--corpus ID=PATH|DOMAIN`.
+The first run over the whole set found a harness defect: the sandbox's
+timeout killed the docker client and not the container, so a "timed
+out" container kept running beside the next one and the host's memory
+guard killed the runner, discarding everything measured (CF-49).
+Containers are named and killed on timeout now, with a test that leaks
+one against the pre-fix code, and a checkpoint of finished runs is
+written after every run.
+The recorded run of this PR covers the self corpus and the two corpora
+with third-party tasks; the whole set does not fit the design's
+four-hour budget on a workstation (one pass alone ran past two hours,
+CF-53), which sizes the scheduled job rather than trimming the set. The
+run found two things worth more than its rows: our own adapter answers
+the reference-finding category with the import-graph tool, and that
+tool's reply says which tool to use instead, so our row there is zero on
+every corpus until the adapter is corrected (CF-51, a loss recorded as
+one); and one competitor's image lacks the runtime its JavaScript
+language server needs, so its rows on that corpus are not comparable
+rather than lost (CF-52). Neither is fixed here: adapters change one per
+PR.
+
+### Added - the eighth competitor row, the embedding representative over MCP stdio with a local model (FINDINGS CF-43 to CF-45)
+
+The last adapter of the set is the one whose retrieval is a vector
+search over AST chunks with a sentence-embedding model run locally on
+the CPU (FIELD.md, set row 8; it replaces the home-made RAG baseline
+as the embedding representative). Installed with pip from a lockfile
+that pins the package with its documented local-model extra and every
+dependency by hash; the default model is downloaded once at image
+build into a cache the offline run reads. Its daemon, which its own
+client starts on first use and talks to over a Unix socket, does not
+trip the sandbox rule: it is spawned inside the container, listens on
+the container's tmpfs and dies with it, and every row pays its start
+inside the index time, which is the tool's own design.
+
+Two things shape the rows and are recorded rather than worked around:
+its search refreshes the index before every answer by default, which is
+most of each call's latency and is charged as an agent pays it; and an
+embedding model asked an identifier ranks by meaning, so the
+definition-lookup row measures a lexical question put to a semantic
+tool, which the fairness note names as the harness's choice of task,
+not the tool's failing. Its docs describe no references or dependents
+tool, so those rows are NOT COMPARABLE by scope, not zero. The probe
+ran over the pinned corpus (CF-32's rule). The rows and their caveats
+are FINDINGS CF-43 to CF-45 beside the result file.
+
+### Added - the seventh competitor row, a repo-map tool on the token axis only (FINDINGS CF-40 to CF-42)
+
+The map-shaped approach in the lane (FIELD.md, set row 6; the one a
+third-party review says beats us on cross-file awareness, and the one
+our own whitepaper calls complementary) is a measured row for the first
+time, on the only axis a map can be measured on: what the text it sends
+with every change request costs at the tool's default budget. It is not
+an answer to a question, so no F1 row exists for it and none is
+invented; the adapter answers token tasks only, passes the query
+nowhere because the tool takes none, and cites nothing. Installed with
+pip from a lockfile that pins the package and every dependency by hash,
+on the Python the package declares, with the tokenizer assets cached at
+image build so the offline run fetches nothing.
+
+Two of its behaviours shape the row and are recorded rather than worked
+around: its default budget is not the figure its docs give but a clamp
+on the model's context window, read from its own banner line; and its
+stdout carries a human-facing announce block ahead of the map, so the
+payload is the map after the tool's own preface and the block is kept
+aside. The probe ran over the pinned corpus, and its banner is what
+exposed CF-39. The rows and their caveats are FINDINGS CF-40 to CF-42
+beside the result file.
+
+### Fixed - the competitive self corpus carried this tree's bytecode, and every recorded row was measured over it (FINDINGS CF-39)
+
+The pinned self corpus is `src/` copied and git-inited, and the copy
+was a plain `copytree`: every `__pycache__` the host interpreter had
+left behind rode along and was committed, so the repository each tool
+was told to index held three compiled files for every source file. The
+shared file set the scorer uses was never touched (it is text files off
+`git ls-files`), so no F1 or token row read them; what did is every
+tool's own index step, which saw a repository three times the size it
+should have, and one tool's own banner printed the count. The copy now
+excludes bytecode by directory name and by suffix, the property is
+asserted over `git ls-files` of a built corpus, and the whole set was
+re-recorded on the corrected corpus; what moved per tool, and what did
+not, is CF-39 beside the two result files.
+
+### Added - the sixth competitor row, a pre-written-cards tool over MCP stdio on its deterministic path (FINDINGS CF-35 to CF-38)
+
+The structurally different approach in the lane (FIELD.md, set row 5) is
+a measured row, on the path its docs describe as needing no key and no
+network: the tree-sitter wiring graph and per-file cards its build writes
+to disk, served by its MCP server. Its npm package and every dependency
+are pinned by integrity hash in a lockfile the image installs with `npm
+ci`; the native grammar addons are built at image build; nothing is
+fetched at run. Its graph is written to a context directory outside the
+read-only corpus through the documented global option, with the two files
+it would otherwise write into the repo switched off by its documented
+flags. The LLM layer its headline claims are made for is not built (no
+key), and the fairness note records that as the first disadvantage.
+
+Two of its behaviours shape the rows and are recorded rather than worked
+around: its file-level import edges are unresolved on this corpus, so the
+documented file-dependents route answers with none and points, in its own
+text, at its regex search; the adapter follows that instruction only when
+the tool gives it, in a second container, and cites what the search lists.
+And every answer opens with a token-savings estimate addressed to the
+agent, which is part of what an agent receives and is charged like the
+rest; no row reads the estimate. The probe ran over the pinned corpus
+(the rule CF-32 set). The rows and their caveats are FINDINGS CF-35 to
+CF-38 beside the result file.
+
+### Added - the fifth competitor row, a knowledge-graph tool over MCP stdio with a one-tool default surface (FINDINGS CF-31 to CF-34)
+
+The lane's largest adoption (FIELD.md, set row 4) is a measured row. Its
+release bundle for linux-x64 is verified against the release's published
+checksums and installed the way its install script installs it, without
+running the script; nothing is compiled and nothing is fetched at run.
+The tool keeps its index inside the project root and the corpus mount is
+read-only, so each container indexes a copy on the sandbox's private
+tmpfs, a harness cost timed by nobody and a read path faster than the
+bind mount every other adapter reads through, which the fairness note
+records under advantages. Its documented sandboxed-environment setting
+and its documented off-switch for telemetry and the update check are set;
+its documented watcher-off flag is passed, because nothing changes under
+a measurement.
+
+Two things the probes found shape the adapter and are recorded rather
+than smoothed over: the tool's primary answer tool elides lines it sent
+earlier in a session, so a shared session would make a task's token
+count depend on the tasks before it, and every T task runs in its own
+session; and its file-dependents answer names eight files and a count,
+so its P4 recall is capped by its output shape and the citations are the
+eight it names, never the count. A probe over the full checkout rather
+than the pinned corpus produced a draft finding about the task set that
+the recorded run did not support; it is recorded as a method finding
+with the rule that closes it. The rows, their caveats and the schema
+weight of both surfaces are FINDINGS CF-31 to CF-34 beside the result
+file.
+
+### Added - the fourth competitor row, an LSP-backed tool over MCP stdio (FINDINGS CF-27 to CF-30)
+
+The alternative the field survey lists first (FIELD.md, set row 1) is
+a measured row. Its wheel, the language-server package it pins and
+every dependency are pinned by version and hash in a lockfile the image
+installs with `--require-hashes`; the language server is launched from
+the image through the tool's documented `ls_path` setting, so no `uvx`
+download happens at run time, and the Node runtime its Python wrapper fetches
+on first use is fetched once at build. The tool's global configuration is
+pinned in the tree: the template's values, with the dashboard and GUI log
+window off and per-project data pointed outside the read-only corpus
+mount.
+
+Two harness defects fell out of the first probes and both are fixed
+where the next tool inherits the fix: the wrapper's pinned Node-version
+variable makes it re-run its installer on every start (a download that
+killed the server under `--network none`), so the image unsets it for the
+run; and the MCP driver read a server's stderr only at exit, so a server
+that logs every tool result there filled the pipe mid-call and read as a
+hang. The driver drains stderr continuously now, and the two earlier MCP
+rows are re-measured with it in this PR's recorded run. The rows
+themselves and their caveats are FINDINGS CF-27 to CF-30 beside the
+result file (`results/2026-09-05-76e75398.json`): a per-call latency
+dominated by the Windows bind mount, a token row dominated by a pattern
+search that returns every match, and a second instance of a server
+reporting its framework's version rather than its own.
+
+### Added - the third competitor row, over MCP stdio (FINDINGS CF-23 to CF-26)
+
+The tool's own published token-reduction claim (FIELD.md) is now a
+measured row instead of a quoted one. The PyPI wheel
+and every one of its dependencies are pinned by version and hash in a
+lockfile the image installs with `--require-hashes`; the base install
+only, because the README makes embeddings, communities and Python
+call-resolution optional extras. The same `mcp_driver.py` that drove
+the second row drives this tool's `serve` command; the tool's default
+data dir is inside the repository, which the sandbox mounts read-only, so
+its documented `CRG_DATA_DIR` knob points it at the writable mount.
+
+The three-run rows of this configuration are FINDINGS CF-23 to CF-26
+beside the result file (`results/2026-09-05-95eb4a00.json`): an answer
+that is the tool's own at its documented default and not an adapter
+defect (CF-23), a token row that is not like-for-like (the tool returns no
+source bodies, so the agent's own reads are uncharged) and must carry
+that caveat wherever it is quoted (CF-24), a second witness for a candidate
+CF-20 already raised (CF-25), and a `serverInfo` field that reports the
+framework's version rather than the tool's, the defect our own server
+shipped until 1.108.292 (CF-26).
+
+### Added - the second competitor row, over MCP stdio (FINDINGS CF-19 to CF-22)
+
+`benchmarks/competitive/sandbox/mcp_driver.py` is a minimal MCP client
+that runs inside a competitor's container: initialize, `tools/list` (the
+schema weight every MCP server pays, counted in the shape the field's
+tool-definition benchmark uses), then each task's `tools/call`, every
+round trip timed. The tool is driven through it the way its own
+`mcpServers` entry drives it, from the release's portable archive
+verified against its published checksum (the PyPI wheel is a
+launcher that fetches the runtime on first run, a network step the sandbox
+forbids after build). The tool refuses a cache it does not own, so the
+sandbox gained one more mount, a uid-owned 0700 tmpfs, pinned in the test
+like every other flag; it refuses the corpus root as "too broad", so the
+adapter indexes each top-level directory as its message asks.
+
+The P4 ground truth is the union of textual and re-export-resolved
+importers now, computed from source by AST (FINDINGS CF-19), because a
+truth only one definition satisfies grades the tool holding the other
+definition down. The three-run rows of this configuration, and the
+`competitive-gap` candidates they raise for item 5, are FINDINGS CF-19 to
+CF-22 beside the result file (`results/2026-09-05-73fbd7cf.json`); the latency and cold-index rows of that run
+were unstable under the 10% rule and are not claimed. None is an issue
+until item 5 exists and the pinned corpora agree; none touches product
+source.
+
+### Added - the competitive tier's sandbox and its first competitor row (FINDINGS CF-12 to CF-18)
+
+Every measured tool, jCodeMunch included, now runs inside a container the
+tier builds from a pinned Dockerfile (base image by digest, the tool by
+release checksum) and runs with the network removed, a read-only root, no
+capabilities, an unprivileged user and memory and pid ceilings
+(`benchmarks/competitive/sandbox.py`; `tests/test_competitive_sandbox.py`
+pins every flag and that no host variable reaches the tool). jCodeMunch's
+own row moved into the same shape (`sandbox/jcodemunch.Dockerfile`, built
+from what a commit of the working tree would contain, with one worker file
+run identically on the host when there is no Docker), so the sandbox's
+cost is paid on every row and a result file says which sandbox, whether
+the tree was dirty and which scorer wrote it. The tool is driven per its
+README's agent policy (`investigate`, `search` then `show` on the top 3,
+`refs`, `importers`), with its default output as the payload and an
+uncharged `--json` twin for citations; its fairness note under
+`docs/competitive/fairness/` was written before its first number.
+
+The first three-run result with a competitor on the table is recorded
+in `docs/competitive/FINDINGS.md` (CF-12 to CF-18) beside the result file
+it came from. Those rows are one 277-file corpus, ten tasks and the
+loop's first week of methodology, not a product comparison, and each
+entry says what it is evidence of and what it is not. Review round 1
+corrected two places where the first draft favoured the home team (the
+shared file set, CF-5; the P4 ground truth, CF-18). A timed-out or failed competitor is a
+`not_runnable` row now, never partial means; the jcodemunch image is
+two-stage with dependencies pinned from `uv.lock`; a `show` miss is
+charged what the agent sees, like every other miss.
+
+### Added - the competitive tier: the null alternatives and jCodeMunch through one interface
+
+`benchmarks/competitive/` is the first piece of the competitive feedback
+loop (`docs/competitive/FIELD.md`, `DESIGN.md`): one adapter interface that
+jCodeMunch, read-all and grep-top-3 all implement, a runner that puts every
+row through the same corpus, the same tasks and the same tokenizer three
+times, and a result file that carries the raw triple, the median, the
+spread, the band and whether a gap is meaningful. The point of shipping the
+nulls first is that every later competitor row is measured against a
+table that already shows what "no tool" costs on the same line. No competitor is
+measured yet; nothing here reads a README, and a result file has no field
+a self-reported figure could be typed into.
+
+The first three-run result on the self corpus caught the scoring rule
+mis-stated in DESIGN s5.1: the band was built from three times the larger
+of the two spreads and THEN each row was judged stable against it, so an
+unstable competitor triple (50, 100, 300) widened its own band to 750 and
+read as stable. Stability is judged first now, against the row's own
+median, and an unstable row is never a meaningful gap in either direction.
+The reviewer then found two more places the first draft leaned our way
+without saying so: our own adapter indexed with context providers OFF
+while its header said "shipped defaults" (they ship ON; the adapter runs
+them now), and F1 matched cited lines to expected lines many-to-many, so a
+tool that cites every matching line, which grep does by construction, was
+paid once per citation for a single hit. Matching is one-to-one now and the
+read-all row scores a real precision (expected over corpus lines) instead
+of a floor typed as 0.0.
+`tests/test_competitive_tier.py` pins that pair, the F1 tolerance rule, the
+grep baseline's ranking and whole-file reads (ARCHAEOLOGY R24-R26), and the
+end-to-end result file.
+
 ### Added - the inbound layer: headless triage of issues and PRs, off by default
 
 `docs/inbound/` (AUDIT, POLICY, DESIGN, FINDINGS, VERIFICATION) and the
